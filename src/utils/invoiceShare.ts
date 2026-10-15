@@ -1,0 +1,290 @@
+import { Platform, Linking, Alert } from 'react-native';
+import { Invoice, InvoiceItem } from '../services/sqlite';
+import { UserSession } from '../store/useAuthStore';
+import { generateInvoiceHTML } from '../services/pdfGenerator';
+
+/**
+ * Encodes invoice data payload safely for URL query transport
+ */
+export function encodeInvoicePayload(
+  business: Partial<UserSession>,
+  invoice: Invoice,
+  items: InvoiceItem[]
+): string {
+  try {
+    const payload = {
+      b: {
+        n: business.businessName || 'Business',
+        p: business.phone || '',
+        a: business.address || '',
+        e: business.email || '',
+        l: business.logoUri || ''
+      },
+      inv: {
+        id: invoice.id,
+        t: invoice.total,
+        st: invoice.subtotal,
+        d: invoice.discount || 0,
+        dt: invoice.createdAt,
+        cn: invoice.customerName || '',
+        cp: invoice.customerPhone || ''
+      },
+      items: items.map(it => ({
+        n: it.productName,
+        q: it.quantity,
+        p: it.price,
+        t: it.total
+      }))
+    };
+
+    const jsonStr = JSON.stringify(payload);
+    if (typeof btoa !== 'undefined') {
+      return btoa(unescape(encodeURIComponent(jsonStr)));
+    }
+    // Fallback for environments without btoa
+    return Buffer.from(jsonStr, 'utf-8').toString('base64');
+  } catch (err) {
+    console.warn('Failed to encode invoice payload:', err);
+    return '';
+  }
+}
+
+/**
+ * Decodes invoice data payload from URL query transport
+ */
+export function decodeInvoicePayload(encoded: string): {
+  business: Partial<UserSession>;
+  invoice: Invoice;
+  items: InvoiceItem[];
+} | null {
+  try {
+    let jsonStr = '';
+    if (typeof atob !== 'undefined') {
+      jsonStr = decodeURIComponent(escape(atob(encoded)));
+    } else {
+      jsonStr = Buffer.from(encoded, 'base64').toString('utf-8');
+    }
+    const data = JSON.parse(jsonStr);
+
+    return {
+      business: {
+        businessName: data.b?.n || 'Business',
+        phone: data.b?.p || '',
+        address: data.b?.a || '',
+        email: data.b?.e || '',
+        logoUri: data.b?.l || ''
+      },
+      invoice: {
+        id: data.inv?.id || 'INV_0000',
+        userId: 'public',
+        businessId: 'public',
+        createdBy: 'public',
+        total: Number(data.inv?.t) || 0,
+        subtotal: Number(data.inv?.st) || Number(data.inv?.t) || 0,
+        discount: Number(data.inv?.d) || 0,
+        createdAt: data.inv?.dt || new Date().toISOString(),
+        customerName: data.inv?.cn || 'Customer',
+        customerPhone: data.inv?.cp || '',
+        synced: 0,
+        lastUpdated: data.inv?.dt || new Date().toISOString(),
+      },
+      items: (data.items || []).map((it: any) => ({
+        id: 'item_' + Math.random().toString(36).substring(2, 7),
+        invoiceId: data.inv?.id || '',
+        productId: '',
+        productName: it.n || 'Item',
+        quantity: Number(it.q) || 1,
+        price: Number(it.p) || 0,
+        total: Number(it.t) || 0,
+      })) as InvoiceItem[]
+    };
+  } catch (err) {
+    console.warn('Failed to decode invoice payload:', err);
+    return null;
+  }
+}
+
+/**
+ * Generates the public invoice link with business name, total, date & full payload
+ */
+export function getInvoicePublicUrl(
+  business: Partial<UserSession>,
+  invoice: Invoice,
+  items: InvoiceItem[]
+): string {
+  let origin = 'http://localhost:8081';
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    origin = window.location.origin;
+  }
+
+  const formattedDate = new Date(invoice.createdAt).toLocaleDateString('en-PK', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+
+  const cleanId = invoice.id.replace(/^inv_/i, '').toUpperCase();
+  const encodedData = encodeInvoicePayload(business, invoice, items);
+
+  const params = new URLSearchParams();
+  params.set('biz', business.businessName || 'Business');
+  params.set('total', Math.round(invoice.total).toString());
+  params.set('date', formattedDate);
+  if (invoice.customerName) params.set('c', invoice.customerName);
+  if (invoice.customerPhone) params.set('p', invoice.customerPhone);
+  if (encodedData) params.set('data', encodedData);
+
+  return `${origin}/invoice/${cleanId}?${params.toString()}`;
+}
+
+/**
+ * Normalizes customer phone numbers to international WhatsApp format (e.g. 923001234567)
+ */
+export function formatCustomerPhoneForWhatsApp(phone: string): string {
+  if (!phone) return '';
+  let clean = phone.trim().replace(/\D/g, '');
+  if (clean.startsWith('00')) {
+    clean = clean.substring(2);
+  }
+  // Pakistan mobile formatting: 03001234567 -> 923001234567
+  if (clean.startsWith('03') && clean.length === 11) {
+    clean = '92' + clean.substring(1);
+  } else if (clean.startsWith('3') && clean.length === 10) {
+    clean = '92' + clean;
+  } else if (clean.startsWith('0') && clean.length >= 10) {
+    clean = clean.substring(1);
+    if (!clean.startsWith('92') && clean.length === 10) {
+      clean = '92' + clean;
+    }
+  } else if (!clean.startsWith('92') && clean.length === 10) {
+    clean = '92' + clean;
+  }
+  return clean;
+}
+
+/**
+ * Crafts professional WhatsApp message with merchant name, bill total, date, and link
+ */
+export function getWhatsAppInvoiceMessage(
+  business: Partial<UserSession>,
+  invoice: Invoice,
+  items: InvoiceItem[]
+): {
+  message: string;
+  url: string;
+  cleanPhone: string;
+  formattedPhone: string;
+} {
+  const url = getInvoicePublicUrl(business, invoice, items);
+
+  const formattedDate = new Date(invoice.createdAt).toLocaleDateString('en-PK', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  const formattedTotal = 'PKR ' + invoice.total.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const bizName = business.businessName || 'Our Shop';
+  const custName = invoice.customerName?.trim() || 'Valued Customer';
+  const invNumber = invoice.id.replace(/^inv_/i, '').toUpperCase();
+
+  const message =
+    `Assalam-o-Alaikum *${custName}*,\n\n` +
+    `Thank you for shopping with us at *${bizName}*! 🙏\n\n` +
+    `🧾 *INVOICE DETAILS*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🏪 *Business:* ${bizName}\n` +
+    `📋 *Invoice #:* #${invNumber}\n` +
+    `📅 *Date:* ${formattedDate}\n` +
+    `💰 *Total Bill:* *${formattedTotal}*\n` +
+    `💳 *Status:* Paid\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `📄 *View & Download Official PDF Invoice:*\n` +
+    `👉 ${url}\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `Thank you for your business! JazakAllah Khair.\n` +
+    `*${bizName}*`;
+
+  const cleanPhone = invoice.customerPhone ? invoice.customerPhone.trim() : '';
+  const formattedPhone = formatCustomerPhoneForWhatsApp(cleanPhone);
+
+  return { message, url, cleanPhone, formattedPhone };
+}
+
+/**
+ * Copies the complete WhatsApp invoice message and link to the clipboard
+ */
+export async function copyWhatsAppInvoiceToClipboard(
+  business: Partial<UserSession>,
+  invoice: Invoice,
+  items: InvoiceItem[]
+): Promise<boolean> {
+  const { message } = getWhatsAppInvoiceMessage(business, invoice, items);
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(message);
+      return true;
+    }
+  } catch (err) {
+    console.warn('Clipboard write failed:', err);
+  }
+  return false;
+}
+
+/**
+ * Handles opening WhatsApp directly to the customer's chat with pre-filled message
+ * @param target 'web' opens web.whatsapp.com directly (skips landing page entirely)
+ *               'app' opens native WhatsApp Desktop app (whatsapp://send)
+ *               'auto' uses direct WhatsApp Web on desktop web and native app on mobile
+ */
+export async function openWhatsAppInvoice(
+  business: Partial<UserSession>,
+  invoice: Invoice,
+  items: InvoiceItem[],
+  customPhone?: string,
+  target: 'web' | 'app' | 'auto' = 'web'
+): Promise<void> {
+  const phoneToUse = customPhone || invoice.customerPhone;
+  const { message } = getWhatsAppInvoiceMessage(business, invoice, items);
+  const formattedPhone = formatCustomerPhoneForWhatsApp(phoneToUse);
+
+  if (!formattedPhone || formattedPhone.length < 10) {
+    Alert.alert('Customer Phone Required', 'Bill banatay waqt customer ka valid mobile number enter karein (e.g. 03001234567).');
+    return;
+  }
+
+  const encodedMsg = encodeURIComponent(message);
+  // Direct WhatsApp Web chat URL: goes STRAIGHT into customer chat without intermediate landing page
+  const webChatUrl = `https://web.whatsapp.com/send/?phone=${formattedPhone}&text=${encodedMsg}`;
+  // Direct Native WhatsApp Windows / Mobile protocol
+  const appProtocolUrl = `whatsapp://send?phone=${formattedPhone}&text=${encodedMsg}`;
+
+  if (Platform.OS === 'web') {
+    if (target === 'app') {
+      try {
+        // Attempt to launch Windows WhatsApp Desktop app directly
+        window.location.href = appProtocolUrl;
+      } catch (err) {
+        window.open(webChatUrl, '_blank');
+      }
+    } else {
+      // Direct WhatsApp Web: opens directly into that customer's chat with prefilled message
+      window.open(webChatUrl, '_blank');
+    }
+  } else {
+    // Native Mobile: WhatsApp app deep link with fallback
+    try {
+      const canOpen = await Linking.canOpenURL(appProtocolUrl);
+      if (canOpen) {
+        await Linking.openURL(appProtocolUrl);
+      } else {
+        await Linking.openURL(webChatUrl);
+      }
+    } catch {
+      await Linking.openURL(webChatUrl);
+    }
+  }
+}
+

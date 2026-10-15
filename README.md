@@ -1,56 +1,135 @@
-# Welcome to your Expo app 👋
+# Vyapar Multi-Biz: Mobile Business Management Platform
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Vyapar Multi-Biz is a scalable, offline-first mobile and web application built using **React Native with Expo**, **SQLite**, and **Firebase**. It is designed for merchants and shop owners who need to manage their products, inventory, invoices, and expenses across multiple independent business profiles with secure data isolation.
 
-## Get started
+---
 
-1. Install dependencies
+## 🏗️ Architecture & Core Design
 
-   ```bash
-   npm install
-   ```
+### 1. Local-First / Sync-Second
+The application is designed to be **resilient to network fluctuations**. All user actions (creating invoices, updating stock, logging expenses) are executed instantly in a local relational **SQLite** database.
+- **Relational Integrity:** Utilizes SQL transactions. Creating an invoice automatically deducts stock; canceling an invoice rolls back and restores stock.
+- **Soft Deletion:** Deletions set a `deleted = 1` flag, queuing the change for synchronization.
 
-2. Start the app
+### 2. Synchronization Engine
+A background sync worker monitors network connection state (via `@react-native-community/netinfo`):
+- **Upload Sync:** Identifies locally modified records where `synced = 0` and pushes updates to Firebase Firestore.
+- **Download Sync:** Pulls remote modifications that occurred since the local sync checkpoint using Timestamp markers.
+- **Data Isolation:** All database collections in Firestore are organized in subcollections scoped by the user's Auth UID (`users/{userId}/...`), keeping each business completely isolated.
 
-   ```bash
-   npx expo start
-   ```
+### 3. Graceful Hybrid Fallback (Demo Sandbox)
+If the app is launched without a network connection or without production Firebase credentials configured, it automatically enables **Offline Demo Mode**. A demo sandbox profile is created in SQLite, unlocking 100% of the app's features (cataloging, invoicing, receipt previews, expenses) without requiring a sign-in.
 
-In the output, you'll find options to open the app in a
+---
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## 🛠️ Tech Stack
+- **Frontend Framework:** React Native with Expo SDK 57 (Expo Router)
+- **Local Storage:** `expo-sqlite`
+- **Network Listener:** `@react-native-community/netinfo`
+- **Sharing & Printing:** `expo-print` & `expo-sharing`
+- **Cloud Backend:** Firebase Auth, Firestore
+- **State Management:** React Context API
+- **Vector Icons:** `@expo/vector-icons` (Ionicons)
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+---
 
-## Get a fresh project
+## 📂 Directory Structure
 
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+├── src/
+│   ├── app/                      # Expo Router navigation tabs and screen routes
+│   │   ├── index.tsx             # Dashboard: Sales, Expenses, Profit metrics, Low Stock alerts
+│   │   ├── products.tsx          # Inventory Catalog: search, chip filters, quick restock adjusters
+│   │   ├── bills.tsx             # Invoices & billing: billing form, customer details, past invoices
+│   │   ├── expenses.tsx          # Expenses: logger by category, category distribution bars
+│   │   ├── settings.tsx          # Business settings: invoice details form, backup status, manual sync
+│   │   └── _layout.tsx           # Navigation controller wrapping contexts and splash overlays
+│   ├── components/               # Custom UI assets & widgets
+│   │   ├── Button.tsx            # Theme-coded large interactive buttons
+│   │   ├── Card.tsx              # Shadowed container wrapper
+│   │   ├── Input.tsx             # Floating-border field with inline password visibility toggle
+│   │   ├── AuthScreen.tsx        # Sign-in / registration landing forms & Demo mode CTA
+│   │   ├── ReceiptModal.tsx      # ESC/POS monospace paper preview, share, and simulated print popup
+│   │   └── app-tabs.tsx          # Bottom tab layouts with vectors (Ionicons)
+│   ├── context/                  # React state providers
+│   │   ├── AuthContext.tsx       # Auth sessions management (Firebase Auth & local sandbox)
+│   │   └── DatabaseContext.tsx   # SQLite wrapper, transactional updates, netinfo sync workers
+│   ├── services/                 # Interfaces for external APIs
+│   │   ├── firebase.ts           # Firebase SDK initialization with AsyncStorage persistence
+│   │   ├── sqlite.ts             # Local database table creation and CRUD operations
+│   │   ├── sync.ts               # Local-to-cloud reconciler
+│   │   ├── pdfGenerator.ts       # HTML invoice rendering and sharing (WhatsApp integration)
+│   │   └── thermalPrinter.ts     # ESC/POS 58mm printer formatters and BLE simulator
+│   ├── theme/
+│   │   └── colors.ts             # Mint/Teal primary and Slate background mapping definitions
+│   └── global.d.ts               # Global stylesheets module definitions
+├── assets/                       # App static image assets
+├── tsconfig.json                 # TypeScript compiler setup
+├── app.json                      # Expo plugins and platform configurations
+└── package.json                  # Dependencies configuration
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+---
 
-### Other setup steps
+## 🚀 Installation & Running Guide
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+### 1. Clone & Install Dependencies
+Navigate to the root project directory and install npm packages:
+```bash
+npm install
+```
 
-## Learn more
+### 2. Configure Firebase Web Credentials
+Create a `.env` file in the root directory (or inject them directly in your environment):
+```env
+EXPO_PUBLIC_FIREBASE_API_KEY="your-firebase-api-key"
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN="your-project-id.firebaseapp.com"
+EXPO_PUBLIC_FIREBASE_PROJECT_ID="your-project-id"
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET="your-project-id.appspot.com"
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="your-sender-id"
+EXPO_PUBLIC_FIREBASE_APP_ID="your-app-id"
+```
+*Note: If these env variables are omitted, the app gracefully runs in Local Offline-First mode automatically.*
 
-To learn more about developing your project with Expo, look at the following resources:
+### 3. Firebase Security Rules
+Deploy the following Security Rules to your Firebase console to ensure users can **only** read and write their own business data:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Scopes rules for all documents under 'users/{userId}' subcollection path
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+```
 
-## Join the community
+### 4. Running the Dev Server
+Start the Expo Metro bundler:
+```bash
+npx expo start
+```
+Use the terminal prompt keys to run:
+- **`w`** to open in a web browser.
+- **`a`** to load on an Android emulator.
+- **`i`** to load on an iOS simulator.
+- Scan the QR code using the **Expo Go** application on your physical device.
 
-Join our community of developers creating universal apps.
+---
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## 🖨️ Thermal Printing & PDF Sharing
+
+### 1. Invoice PDF Compilation
+When you generate an invoice, the app compiles the data into a responsive HTML sheet styled in Indian Rupees (₹). `expo-print` generates a PDF file from this HTML, and `expo-sharing` initiates a native action sheet allowing you to share the invoice directly to **WhatsApp, Email, or Files**.
+
+### 2. ESC/POS 58mm Receipt Printer compatibility
+The app includes a dedicated formatter mapping values to a **32-character** layout compatible with standard **58mm Bluetooth receipt printers**:
+- Centered double-height bold store headers.
+- Tabular item columns (`Item (12 char) | Qty (4 char) | Rate (7 char) | Total (9 char)`).
+- Dotted dividers.
+- Bold grand totals.
+- Native paper-cutting codes.
+
+A monospace print preview screen is provided, complete with simulated Bluetooth printer connections (transmitting raw byte buffers) so you can test physical layouts.
