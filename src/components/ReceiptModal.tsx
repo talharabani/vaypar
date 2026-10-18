@@ -394,39 +394,20 @@ export function ReceiptModal({ visible, invoice, items, onClose, onExchangeRetur
                     />
                   </View>
 
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                    <Button
-                      title="Print Backside (Branding Slip)"
-                      variant="outline"
-                      size="small"
-                      onPress={async () => {
-                        try {
-                          await printThermalBacksideSlip(user, paperWidth);
-                          setSuccessMessage('Backside branding sent to printer!');
-                          setPrintSuccess(true);
-                          setTimeout(() => setPrintSuccess(false), 3500);
-                        } catch (e: any) {
-                          Alert.alert('Print Error', e.message || 'Could not print backside slip.');
-                        }
-                      }}
-                      style={{ flex: 1.1, borderColor: '#D97706' }}
-                      icon={<Ionicons name="sparkles" size={14} color="#D97706" />}
-                    />
-
-                    {Platform.OS === 'web' && (
+                  {Platform.OS === 'web' && (
+                    <View style={{ marginTop: 8 }}>
                       <Button
-                        title="Preview Slip"
+                        title="Preview & Print Thermal Slip"
                         variant="secondary"
-                        size="small"
+                        size="medium"
                         onPress={() => {
                           const html = generateThermalSlipHTML(user, invoice, items, paperWidth);
                           openThermalPrintWindow(html);
                         }}
-                        style={{ flex: 0.9 }}
-                        icon={<Ionicons name="open-outline" size={14} color={theme.text} />}
+                        icon={<Ionicons name="open-outline" size={16} color={theme.text} />}
                       />
-                    )}
-                  </View>
+                    </View>
+                  )}
 
                   {printSuccess && (
                     <View style={[styles.successBanner, { backgroundColor: theme.success + '15', borderColor: theme.success }]}>

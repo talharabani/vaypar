@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -37,6 +38,8 @@ interface ProductItemUsed {
   total: number;
 }
 
+const DEFAULT_FEE_KEY = 'vaypar_owner_default_service_fee';
+
 export default function PersonalizedServicesScreen() {
   const theme = useTheme();
   const router = useRouter();
@@ -61,12 +64,15 @@ export default function PersonalizedServicesScreen() {
   const [productPickerVisible, setProductPickerVisible] = useState(false);
   const [searchProduct, setSearchProduct] = useState('');
 
-  // Custom service tasks / fees
-  const [serviceTasks, setServiceTasks] = useState<CustomServiceItem[]>([
-    { id: '1', name: 'Service / Labor Fee', fee: 500 },
-  ]);
+  // Service & Labor Fee decided by Owner (Auto-added to totals)
+  const [ownerServiceFee, setOwnerServiceFee] = useState('200');
+  const [serviceJobDescription, setServiceJobDescription] = useState('Service & Labor Charges');
+
+  // Itemized additional tasks
+  const [serviceTasks, setServiceTasks] = useState<CustomServiceItem[]>([]);
   const [newTaskName, setNewTaskName] = useState('');
   const [newTaskFee, setNewTaskFee] = useState('');
+  const [showExtraTaskForm, setShowExtraTaskForm] = useState(false);
 
   // Additional service fee / adjustments
   const [additionalServiceFee, setAdditionalServiceFee] = useState('');
@@ -78,6 +84,25 @@ export default function PersonalizedServicesScreen() {
   const [receiptVisible, setReceiptVisible] = useState(false);
   const [createdInvoice, setCreatedInvoice] = useState<sqlite.Invoice | null>(null);
   const [createdItems, setCreatedItems] = useState<sqlite.InvoiceItem[]>([]);
+
+  // Load saved default service fee on mount
+  useEffect(() => {
+    AsyncStorage.getItem(DEFAULT_FEE_KEY)
+      .then(saved => {
+        if (saved !== null && saved !== undefined && saved.trim() !== '') {
+          setOwnerServiceFee(saved);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveDefaultFee = async () => {
+    const feeVal = ownerServiceFee.trim() || '0';
+    try {
+      await AsyncStorage.setItem(DEFAULT_FEE_KEY, feeVal);
+      Alert.alert('Default Saved', `PKR ${feeVal} is now your default service fee. It will load automatically on new bills.`);
+    } catch {}
+  };
 
   // Filtered customer directory
   const filteredCustomers = useMemo(() => {
@@ -99,12 +124,15 @@ export default function PersonalizedServicesScreen() {
     );
   }, [products, searchProduct]);
 
-  // Totals calculations
+  // Totals calculations - Automatically includes ownerServiceFee!
   const totals = useMemo(() => {
     const productsSubtotal = selectedProducts.reduce((sum, p) => sum + p.total, 0);
+    const directOwnerFee = parseFloat(ownerServiceFee.replace(/,/g, '')) || 0;
     const tasksFeeTotal = serviceTasks.reduce((sum, t) => sum + (t.fee || 0), 0);
     const extraFee = parseFloat(additionalServiceFee.replace(/,/g, '')) || 0;
-    const totalServiceCharges = tasksFeeTotal + extraFee;
+    
+    // Automatically combines owner service fee + any itemized tasks + extra fees
+    const totalServiceCharges = directOwnerFee + tasksFeeTotal + extraFee;
 
     const discount = parseFloat(discountInput.replace(/,/g, '')) || 0;
     const gross = productsSubtotal + totalServiceCharges;
@@ -112,11 +140,12 @@ export default function PersonalizedServicesScreen() {
 
     return {
       productsSubtotal,
+      directOwnerFee,
       totalServiceCharges,
       discount,
       netTotal,
     };
-  }, [selectedProducts, serviceTasks, additionalServiceFee, discountInput]);
+  }, [selectedProducts, ownerServiceFee, serviceTasks, additionalServiceFee, discountInput]);
 
   // Add Product to Service Bill
   const handleAddProduct = (prod: sqlite.Product) => {
@@ -178,8 +207,10 @@ export default function PersonalizedServicesScreen() {
 
   // Submit and Generate Invoice / Slip
   const handleCompleteService = async () => {
-    if (selectedProducts.length === 0 && serviceTasks.length === 0) {
-      Alert.alert('Empty Job', 'Please add at least one product/part or service fee.');
+    const directFee = parseFloat(ownerServiceFee.replace(/,/g, '')) || 0;
+
+    if (selectedProducts.length === 0 && directFee === 0 && serviceTasks.length === 0) {
+      Alert.alert('Empty Job', 'Please add at least one product/part or enter a service fee.');
       return;
     }
 
@@ -200,7 +231,17 @@ export default function PersonalizedServicesScreen() {
         });
       });
 
-      // Also record service tasks as line items if products exist, or as dedicated service items
+      // 1. Direct Owner Service Fee line item
+      if (directFee > 0) {
+        invoiceItemsToSave.push({
+          productId: `svc_owner_${Date.now()}`,
+          productName: `[Service] ${serviceJobDescription.trim() || 'Service & Labor Fee'}`,
+          quantity: 1,
+          price: directFee,
+        });
+      }
+
+      // 2. Extra itemized service tasks
       serviceTasks.forEach((task, idx) => {
         if (task.fee > 0) {
           invoiceItemsToSave.push({
@@ -272,7 +313,7 @@ export default function PersonalizedServicesScreen() {
       setCustomerName('');
       setCustomerPhone('');
       setSelectedProducts([]);
-      setServiceTasks([{ id: '1', name: 'Service / Labor Fee', fee: 500 }]);
+      setServiceTasks([]);
       setAdditionalServiceFee('');
       setDiscountInput('');
       setJobNotes('');
@@ -406,74 +447,187 @@ export default function PersonalizedServicesScreen() {
           </Card>
 
           {/* Section 3: Personalized Service & Labor Tasks */}
-          <Card style={{ padding: 16, borderColor: theme.border }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <Ionicons name="construct-outline" size={18} color={theme.primary} />
-              <Text style={{ fontSize: 15, fontWeight: '800', color: theme.text }}>
-                Personalized Services & Labor Charges
-              </Text>
+          <Card style={{ padding: 16, borderColor: theme.border, marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="construct-outline" size={20} color={theme.primary} />
+                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>
+                  Personalized Services & Labor Charges
+                </Text>
+              </View>
+              <View style={{ backgroundColor: theme.primary + '18', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: theme.primary, letterSpacing: 0.5 }}>AUTO-ADDS TO BILL</Text>
+              </View>
             </View>
 
-            {/* List of current service tasks */}
-            <View style={{ gap: 8, marginBottom: 12 }}>
-              {serviceTasks.map(task => (
-                <View
-                  key={task.id}
-                  style={[styles.taskRow, { borderColor: theme.border, backgroundColor: theme.background }]}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>{task.name}</Text>
-                  </View>
-                  <Text style={{ fontSize: 14, fontWeight: '900', color: theme.primary, marginRight: 8 }}>
-                    PKR {task.fee.toFixed(0)}
-                  </Text>
-                  <TouchableOpacity onPress={() => handleRemoveTask(task.id)}>
-                    <Ionicons name="trash-outline" size={18} color={theme.danger} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-
-            {/* Add new service task inline */}
-            <View style={[styles.addTaskBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
-              <View style={{ flex: 1.5 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, marginBottom: 4 }}>
+            {/* Direct Service Fee & Description */}
+            <View style={{ gap: 10, marginBottom: 12 }}>
+              <View>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text, marginBottom: 4 }}>
                   Service / Job Description
                 </Text>
                 <TextInput
                   placeholder="e.g. Fitting Labor, Oil Change, Screen Repair..."
                   placeholderTextColor={theme.textSecondary}
-                  value={newTaskName}
-                  onChangeText={setNewTaskName}
+                  value={serviceJobDescription}
+                  onChangeText={setServiceJobDescription}
                   style={[styles.inputField, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]}
                 />
               </View>
 
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, marginBottom: 4 }}>
-                  Service Fee (PKR)
-                </Text>
+              <View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text }}>
+                    Service Fee (PKR) <Text style={{ color: theme.primary, fontWeight: '600' }}>* Automatically Added</Text>
+                  </Text>
+                  <TouchableOpacity onPress={handleSaveDefaultFee} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Ionicons name="bookmark-outline" size={13} color={theme.primary} />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: theme.primary }}>Save as Default</Text>
+                  </TouchableOpacity>
+                </View>
+
                 <TextInput
-                  placeholder="e.g. 1000"
+                  placeholder="Enter fee (e.g. 200, 500)"
                   placeholderTextColor={theme.textSecondary}
-                  value={newTaskFee}
-                  onChangeText={setNewTaskFee}
+                  value={ownerServiceFee}
+                  onChangeText={setOwnerServiceFee}
                   keyboardType="numeric"
-                  style={[styles.inputField, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]}
+                  style={[styles.inputField, { borderColor: theme.primary, color: theme.text, backgroundColor: theme.background, fontSize: 16, fontWeight: '700' }]}
                 />
               </View>
 
-              <TouchableOpacity
-                onPress={handleAddServiceTask}
-                style={[styles.addTaskBtn, { backgroundColor: theme.primary }]}
-              >
-                <Ionicons name="add-circle-outline" size={16} color="#fff" />
-                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>Add Service</Text>
-              </TouchableOpacity>
+              {/* Quick Preset Chips */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2 }}>
+                {['100', '200', '300', '500', '1000', '1500'].map(amt => {
+                  const isSelected = ownerServiceFee === amt;
+                  return (
+                    <TouchableOpacity
+                      key={amt}
+                      onPress={() => setOwnerServiceFee(amt)}
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 16,
+                        borderWidth: 1.5,
+                        borderColor: isSelected ? theme.primary : theme.border,
+                        backgroundColor: isSelected ? theme.primary + '18' : theme.background,
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: isSelected ? theme.primary : theme.textSecondary }}>
+                        PKR {amt}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                <TouchableOpacity
+                  onPress={() => setOwnerServiceFee('0')}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                    backgroundColor: theme.background,
+                  }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: theme.textSecondary }}>Clear (0)</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
+            {/* List of additional itemized service tasks if any */}
+            {serviceTasks.length > 0 && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: theme.textSecondary, textTransform: 'uppercase', marginBottom: 6 }}>
+                  Extra Tasks ({serviceTasks.length})
+                </Text>
+                {serviceTasks.map(task => (
+                  <View
+                    key={task.id}
+                    style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: 10,
+                      borderRadius: 8,
+                      backgroundColor: theme.background,
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                      marginBottom: 6,
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{task.name}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: theme.primary }}>
+                        PKR {task.fee.toFixed(0)}
+                      </Text>
+                      <TouchableOpacity onPress={() => handleRemoveTask(task.id)}>
+                        <Ionicons name="trash-outline" size={16} color={theme.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Toggle extra task inline box */}
+            <TouchableOpacity
+              onPress={() => setShowExtraTaskForm(!showExtraTaskForm)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingVertical: 6,
+                marginBottom: showExtraTaskForm ? 10 : 4,
+              }}
+            >
+              <Ionicons name={showExtraTaskForm ? 'chevron-up-circle-outline' : 'add-circle-outline'} size={18} color={theme.primary} />
+              <Text style={{ fontSize: 12.5, fontWeight: '700', color: theme.primary }}>
+                {showExtraTaskForm ? 'Hide Extra Tasks Form' : '+ Add Extra Labor / Itemized Job'}
+              </Text>
+            </TouchableOpacity>
+
+            {showExtraTaskForm && (
+              <View style={[styles.addTaskBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border, marginBottom: 10 }]}>
+                <View style={{ flex: 1.5 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, marginBottom: 4 }}>
+                    Extra Task Name
+                  </Text>
+                  <TextInput
+                    placeholder="e.g. Extra Inspection"
+                    placeholderTextColor={theme.textSecondary}
+                    value={newTaskName}
+                    onChangeText={setNewTaskName}
+                    style={[styles.inputField, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]}
+                  />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, marginBottom: 4 }}>
+                    Fee (PKR)
+                  </Text>
+                  <TextInput
+                    placeholder="0"
+                    placeholderTextColor={theme.textSecondary}
+                    value={newTaskFee}
+                    onChangeText={setNewTaskFee}
+                    keyboardType="numeric"
+                    style={[styles.inputField, { borderColor: theme.border, color: theme.text, backgroundColor: theme.background }]}
+                  />
+                </View>
+
+                <TouchableOpacity
+                  onPress={handleAddServiceTask}
+                  style={[styles.addTaskBtn, { backgroundColor: theme.primary }]}
+                >
+                  <Ionicons name="add" size={16} color="#fff" />
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>Add</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Additional Service Charges & Discount */}
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 14 }}>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text, marginBottom: 4 }}>
                   Additional Service Fee / Tax

@@ -31,11 +31,11 @@ const COMMANDS = {
  * Columns layout: Name (12 chars), Qty (4 chars), Rate (7 chars), Total (9 chars)
  * Total width: 12 + 4 + 7 + 9 = 32
  */
-function formatRow(name: string, qty: string, rate: string, total: string): string {
-  const colNameWidth = 12;
+function formatRow(name: string, qty: string, price: string, amount: string): string {
+  const colNameWidth = 14;
   const colQtyWidth = 4;
-  const colRateWidth = 7;
-  const colTotalWidth = 9;
+  const colPriceWidth = 6;
+  const colAmountWidth = 8;
 
   let paddedName = name;
   if (name.length > colNameWidth) {
@@ -45,14 +45,14 @@ function formatRow(name: string, qty: string, rate: string, total: string): stri
   }
 
   const paddedQty = qty.padStart(colQtyWidth, ' ');
-  const paddedRate = rate.padStart(colRateWidth, ' ');
-  const paddedTotal = total.padStart(colTotalWidth, ' ');
+  const paddedPrice = price.padStart(colPriceWidth, ' ');
+  const paddedAmount = amount.padStart(colAmountWidth, ' ');
 
-  return `${paddedName}${paddedQty}${paddedRate}${paddedTotal}`;
+  return `${paddedName}${paddedQty}${paddedPrice}${paddedAmount}`;
 }
 
 /**
- * Generates raw ESC/POS command bytes and plain text for 58mm receipt rolls
+ * Generates raw ESC/POS command bytes and plain text matching standard thermal slip rolls
  */
 export function generateThermalReceipt(
   business: Partial<UserSession>,
@@ -77,11 +77,23 @@ export function generateThermalReceipt(
     byteArrays.push(COMMANDS.LINE_FEED);
   };
 
+  const d = new Date(invoice.createdAt);
+  const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const timeStr = d.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' });
+  const cleanId = invoice.id.replace(/^inv_/i, '').toUpperCase();
+  const billNo = cleanId.substring(0, 6);
+  const tokenNo = (invoice as any).tokenNumber || cleanId.slice(-3) || '27';
+  const cashier = (invoice as any).cashierName || business.name || 'biller';
+  const orderType = (invoice as any).paymentMethod ? (invoice as any).paymentMethod.toUpperCase() : 'COUNTER';
+  const customer = invoice.customerName || 'Walk-In';
+  const totalQty = items.reduce((sum, it) => sum + (it.quantity || 1), 0);
+  const taxId = (business as any).taxNumber || (business as any).ntnNumber || (business as any).gstin || '';
+
   // 1. Initialize Printer
   byteArrays.push(COMMANDS.RESET);
 
   // 2. Header (Center, Double Size, Bold)
-  const busName = business.businessName || 'My Business';
+  const busName = business.businessName || business.name || 'MY BUSINESS';
   plainLines.push(`[CENTER, DOUBLE-SIZE] ${busName}`);
   byteArrays.push(COMMANDS.ALIGN_CENTER);
   byteArrays.push(COMMANDS.TEXT_SIZE_DOUBLE);
@@ -98,43 +110,36 @@ export function generateThermalReceipt(
   if (business.phone) {
     addLine(`Tel: ${business.phone}`, COMMANDS.ALIGN_CENTER);
   }
-
-  // Dividing Line
-  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
-
-  // 4. Metadata
-  const cleanId = invoice.id.replace(/^inv_/i, '').toUpperCase();
-  const dateStr = new Date(invoice.createdAt).toLocaleDateString('en-PK', {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-  addLine(`Invoice ID: #${cleanId}`, COMMANDS.ALIGN_LEFT);
-  addLine(`Date: ${dateStr}`, COMMANDS.ALIGN_LEFT);
-
-  if (invoice.customerName) {
-    addLine(`Cust: ${invoice.customerName}`, COMMANDS.ALIGN_LEFT);
-  }
-  if (invoice.customerPhone) {
-    addLine(`Tel: ${invoice.customerPhone}`, COMMANDS.ALIGN_LEFT);
+  if (taxId) {
+    addLine(`GST/NTN: ${taxId}`, COMMANDS.ALIGN_CENTER);
   }
 
   // Dividing Line
   addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
 
-  // 5. Items Header
-  addLine(formatRow('Item', 'Qty', 'Price', 'Total'), COMMANDS.ALIGN_LEFT);
+  // 4. Customer Name Line
+  addLine(`Name: ${customer}`, COMMANDS.ALIGN_LEFT);
   addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
 
-  // 6. Items Details
+  // 5. Metadata (2 columns)
+  addLine(`Date: ${dateStr}     Dine In: ${orderType.substring(0, 8)}`, COMMANDS.ALIGN_LEFT);
+  addLine(`${timeStr}`, COMMANDS.ALIGN_LEFT);
+  addLine(`Cashier: ${cashier.substring(0, 8).padEnd(8, ' ')}  Bill No.: ${billNo}`, COMMANDS.ALIGN_LEFT);
+  addLine(`Token No.: ${tokenNo}`, COMMANDS.ALIGN_LEFT);
+  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
+
+  // 6. Items Table Header
+  addLine('Item           Qty. Price Amount', COMMANDS.ALIGN_LEFT);
+  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
+
+  // 7. Items Details
   items.forEach(item => {
     addLine(
       formatRow(
         item.productName,
         item.quantity.toString(),
         item.price.toFixed(0),
-        item.total.toFixed(0)
+        item.total.toFixed(2)
       ),
       COMMANDS.ALIGN_LEFT
     );
@@ -143,22 +148,19 @@ export function generateThermalReceipt(
   // Dividing Line
   addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
 
-  // 7. Summary
-  const subtotalStr = `Subtotal: Rs.${invoice.subtotal.toFixed(2)}`;
-  addLine(subtotalStr.padStart(32, ' '), COMMANDS.ALIGN_RIGHT);
+  // 8. Summary
+  addLine(`Total Qty: ${totalQty.toString().padEnd(4, ' ')} Sub Total ${invoice.subtotal.toFixed(2).padStart(8, ' ')}`, COMMANDS.ALIGN_LEFT);
 
   if (invoice.discount > 0) {
-    const discStr = `Discount: -Rs.${invoice.discount.toFixed(2)}`;
-    addLine(discStr.padStart(32, ' '), COMMANDS.ALIGN_RIGHT);
+    addLine(`              Discount -${invoice.discount.toFixed(2).padStart(8, ' ')}`, COMMANDS.ALIGN_LEFT);
   }
 
   if (invoice.serviceCharges && invoice.serviceCharges > 0) {
-    const scStr = `Service Fee: +Rs.${invoice.serviceCharges.toFixed(2)}`;
-    addLine(scStr.padStart(32, ' '), COMMANDS.ALIGN_RIGHT);
+    addLine(`           Service Fee +${invoice.serviceCharges.toFixed(2).padStart(8, ' ')}`, COMMANDS.ALIGN_LEFT);
   }
 
-  // Total (Bold, aligned right)
-  const totalStr = `NET TOTAL: Rs.${invoice.total.toFixed(2)}`;
+  // 9. Grand Total (Bold, aligned right)
+  const totalStr = `Grand Total  Rs. ${invoice.total.toFixed(2)}`;
   plainLines.push(`[BOLD, RIGHT] ${totalStr}`);
   byteArrays.push(COMMANDS.ALIGN_RIGHT);
   byteArrays.push(COMMANDS.BOLD_ON);
@@ -167,17 +169,12 @@ export function generateThermalReceipt(
   byteArrays.push(COMMANDS.BOLD_OFF);
 
   addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
-  addLine(`* ${(busName || 'VAYPAR').toUpperCase()} *`, COMMANDS.ALIGN_CENTER);
-  addLine('Smart Retail Point of Sale', COMMANDS.ALIGN_CENTER);
-  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
-  addLine('RETURN & EXCHANGE POLICY:', COMMANDS.ALIGN_CENTER);
-  addLine('Exchange within 7 days with slip', COMMANDS.ALIGN_CENTER);
-  addLine('Tags intact & resellable condition', COMMANDS.ALIGN_CENTER);
-  addLine('No refund on discounted items', COMMANDS.ALIGN_CENTER);
-  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
-  addLine(`INVOICE: #${cleanId}`, COMMANDS.ALIGN_CENTER);
-  addLine('THANK YOU FOR YOUR VISIT!', COMMANDS.ALIGN_CENTER);
-  addLine('PLEASE VISIT AGAIN!', COMMANDS.ALIGN_CENTER);
+
+  // 10. Footer
+  if (taxId) {
+    addLine(`Lic / NTN: ${taxId}`, COMMANDS.ALIGN_CENTER);
+  }
+  addLine('Thank You, Visit Again.', COMMANDS.ALIGN_CENTER);
 
   // Feeds and paper cut
   byteArrays.push(COMMANDS.LINE_FEED);
@@ -196,7 +193,7 @@ export function generateThermalReceipt(
 }
 
 /**
- * Generates an exact 58mm or 80mm thermal receipt slip HTML optimized for Bluetooth / USB POS printers
+ * Generates an exact 58mm or 80mm single-sided thermal receipt slip HTML matching real POS paper rolls
  */
 export function generateThermalSlipHTML(
   business: Partial<UserSession>,
@@ -206,22 +203,29 @@ export function generateThermalSlipHTML(
 ): string {
   const is58mm = paperWidth === '58mm';
   const widthMm = is58mm ? '58mm' : '80mm';
-  const contentWidthMm = is58mm ? '54mm' : '76mm';
+  const contentWidthMm = is58mm ? '52mm' : '74mm';
+
   const cleanId = invoice.id.replace(/^inv_/i, '').toUpperCase();
-  const dateStr = new Date(invoice.createdAt).toLocaleDateString('en-PK', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  const billNo = cleanId.substring(0, 6);
+  const tokenNo = (invoice as any).tokenNumber || cleanId.slice(-3) || '27';
+
+  const d = new Date(invoice.createdAt);
+  const dateFormatted = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const timeFormatted = d.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+  const cashierName = (invoice as any).cashierName || business.name || 'biller';
+  const orderType = (invoice as any).paymentMethod ? (invoice as any).paymentMethod.toUpperCase() : 'COUNTER';
+  const customerName = invoice.customerName || '';
+
+  const totalQty = items.reduce((sum, it) => sum + (it.quantity || 1), 0);
+  const taxId = (business as any).taxNumber || (business as any).ntnNumber || (business as any).gstin || '';
 
   const itemsRows = items.map(item => `
     <tr>
-      <td style="text-align: left; padding: 4px 0; word-break: break-word; font-weight: 700; color: #000;">${item.productName}</td>
-      <td style="text-align: center; padding: 4px 0; font-weight: 700; color: #000;">${item.quantity}</td>
-      <td style="text-align: right; padding: 4px 0; font-weight: 600; color: #000;">${item.price.toFixed(0)}</td>
-      <td style="text-align: right; padding: 4px 0; font-weight: 900; color: #000;">${item.total.toFixed(0)}</td>
+      <td style="text-align: left; padding: 2px 0; word-break: break-word; font-weight: 600; color: #000;">${item.productName}</td>
+      <td style="text-align: center; padding: 2px 2px; font-weight: 600; color: #000; white-space: nowrap;">${item.quantity}</td>
+      <td style="text-align: right; padding: 2px 2px; font-weight: 500; color: #000; white-space: nowrap;">${item.price.toFixed(0)}</td>
+      <td style="text-align: right; padding: 2px 0; font-weight: 700; color: #000; white-space: nowrap;">${item.total.toFixed(2)}</td>
     </tr>
   `).join('');
 
@@ -252,185 +256,138 @@ export function generateThermalSlipHTML(
             width: ${contentWidthMm} !important;
             max-width: ${contentWidthMm} !important;
             margin: 0 auto;
-            padding: ${is58mm ? '4mm 1mm' : '6mm 2mm'};
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            font-size: ${is58mm ? '12px' : '14px'};
-            line-height: 1.35;
+            padding: ${is58mm ? '3mm 1mm' : '5mm 2mm'};
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace, sans-serif;
+            font-size: ${is58mm ? '11.5px' : '13px'};
+            line-height: 1.25;
             color: #000000;
           }
-          .center { text-align: center; }
-          .right { text-align: right; }
-          .bold { font-weight: 700; }
-          .title {
-            font-size: ${is58mm ? '18px' : '23px'};
+          .store-name {
+            font-size: ${is58mm ? '15px' : '18px'};
             font-weight: 900;
-            margin-bottom: 3px;
+            text-align: center;
+            margin-bottom: 2px;
+            letter-spacing: 0.2px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            line-height: 1.2;
-            color: #000000;
           }
-          .sub {
-            font-size: ${is58mm ? '11px' : '13px'};
-            margin: 2px 0;
+          .store-sub {
+            font-size: ${is58mm ? '10px' : '11.5px'};
+            text-align: center;
             font-weight: 600;
-            color: #000000;
+            margin: 1px 0;
+            color: #111;
           }
-          .divider {
-            border-top: 1.5px dashed #000000;
-            margin: 6px 0;
+          .store-tax {
+            font-size: ${is58mm ? '10px' : '11.5px'};
+            text-align: center;
+            font-weight: 700;
+            margin: 2px 0 3px 0;
           }
-          .meta-row {
-            margin: 2px 0;
-            font-size: ${is58mm ? '11px' : '13px'};
+          .divider-solid {
+            border-top: 1.5px solid #000000;
+            margin: 4px 0;
+          }
+          .customer-line {
+            font-size: ${is58mm ? '11px' : '12.5px'};
+            font-weight: 700;
+            padding: 1px 0;
+          }
+          .meta-grid {
             display: flex;
             justify-content: space-between;
-            color: #000000;
+            font-size: ${is58mm ? '10.5px' : '12px'};
+            font-weight: 600;
+            line-height: 1.3;
           }
-          table {
+          .meta-col-left {
+            text-align: left;
+          }
+          .meta-col-right {
+            text-align: right;
+          }
+          table.items-table {
             width: 100%;
             border-collapse: collapse;
             font-size: inherit;
-            margin: 4px 0;
-            color: #000000;
+            margin: 2px 0;
           }
-          th {
-            border-bottom: 1.5px dashed #000000;
-            padding: 4px 0;
-            font-size: ${is58mm ? '11px' : '13px'};
-            font-weight: 900;
-            text-transform: uppercase;
-            color: #000000;
-          }
-          td {
+          table.items-table th {
+            font-weight: 700;
             padding: 3px 0;
-            vertical-align: top;
-            color: #000000;
+            border-bottom: 1.5px solid #000000;
+            font-size: ${is58mm ? '11px' : '12.5px'};
           }
-          .total-table {
-            width: 100%;
-            margin-top: 4px;
-            color: #000000;
+          .summary-row {
+            display: flex;
+            justify-content: space-between;
+            font-weight: 700;
+            font-size: ${is58mm ? '11px' : '12.5px'};
+            margin: 3px 0;
           }
-          .total-row td {
-            font-size: ${is58mm ? '16px' : '20px'};
+          .summary-sub-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: ${is58mm ? '10.5px' : '12px'};
+            margin: 2px 0;
+          }
+          .grand-total-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: ${is58mm ? '15px' : '18px'};
             font-weight: 900;
-            padding-top: 5px;
-            color: #000000;
+            margin: 5px 0 3px 0;
           }
-
-          /* LAYERS BAKESHOP STYLE LUXURY FOOTER / BACKSIDE BRANDING */
-          .layers-backside {
-            margin-top: 14px;
-            padding-top: 14px;
-            border-top: 1.5px dashed #000000;
+          .footer-section {
             text-align: center;
-            color: #000000;
-          }
-          .top-tag {
-            font-size: ${is58mm ? '10px' : '12px'};
-            font-weight: 800;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            margin-bottom: 10px;
-          }
-          .social-contact {
-            font-size: ${is58mm ? '9px' : '11px'};
-            font-weight: 600;
-            line-height: 1.4;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-          }
-          .location-tag {
-            font-size: ${is58mm ? '8px' : '10px'};
-            font-weight: 800;
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
-            margin-bottom: 10px;
-          }
-          .main-logo-text {
-            font-size: ${is58mm ? '18px' : '24px'};
-            font-weight: 900;
-            letter-spacing: 4px;
-            margin: 8px 0 12px 0;
-            text-transform: uppercase;
-          }
-          .script-box {
-            margin: 6px 0;
-            line-height: 0.85;
-          }
-          .script-thank {
-            font-family: 'Playfair Display', 'Brush Script MT', 'Georgia', cursive, serif;
-            font-size: ${is58mm ? '38px' : '52px'};
-            font-style: italic;
-            font-weight: 800;
-            letter-spacing: -1px;
-            color: #000000;
-          }
-          .script-you {
-            font-family: 'Playfair Display', 'Brush Script MT', 'Georgia', cursive, serif;
-            font-size: ${is58mm ? '40px' : '54px'};
-            font-style: italic;
-            font-weight: 800;
-            letter-spacing: -1px;
-            color: #000000;
-            margin-top: -6px;
-          }
-          .shopping-tag {
-            font-size: ${is58mm ? '10px' : '12px'};
-            font-weight: 900;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            margin-top: 10px;
-          }
-          .stars-row {
-            font-size: ${is58mm ? '13px' : '16px'};
-            letter-spacing: 3px;
-            margin: 8px 0;
-          }
-          .bottom-tag {
-            font-size: ${is58mm ? '10px' : '12px'};
-            font-weight: 800;
-            letter-spacing: 2px;
-            text-transform: uppercase;
+            font-size: ${is58mm ? '10.5px' : '11.5px'};
             margin-top: 4px;
+            line-height: 1.35;
           }
         </style>
       </head>
       <body>
         <div class="receipt">
-          <div class="center title">${business.businessName || 'MY BUSINESS'}</div>
-          ${business.address ? `<div class="center sub">${business.address}</div>` : ''}
-          ${business.phone ? `<div class="center sub">Tel: ${business.phone}</div>` : ''}
+          <!-- Business Header -->
+          <div class="store-name">${business.businessName || business.name || 'MY BUSINESS'}</div>
+          ${business.address ? `<div class="store-sub">${business.address}</div>` : ''}
+          ${business.phone ? `<div class="store-sub">Tel: ${business.phone}</div>` : ''}
+          ${taxId ? `<div class="store-tax">GST / NTN: ${taxId}</div>` : ''}
           
-          <div class="divider"></div>
+          <div class="divider-solid"></div>
 
-          <div class="meta-row">
-            <span><strong>Invoice #:</strong> #${cleanId}</span>
+          <!-- Customer Name -->
+          <div class="customer-line">
+            Name: ${customerName || 'Walk-In'}
           </div>
-          <div class="meta-row">
-            <span><strong>Date:</strong> ${dateStr}</span>
+
+          <div class="divider-solid"></div>
+
+          <!-- 2-Column Metadata -->
+          <div class="meta-grid">
+            <div class="meta-col-left">
+              <div>Date: ${dateFormatted}</div>
+              <div>${timeFormatted}</div>
+              <div>Cashier: ${cashierName}</div>
+              <div>Token No.: ${tokenNo}</div>
+            </div>
+            <div class="meta-col-right">
+              <div>Dine In: ${orderType}</div>
+              <div>&nbsp;</div>
+              <div>Bill No.: ${billNo}</div>
+            </div>
           </div>
-          ${invoice.customerName ? `
-            <div class="meta-row">
-              <span><strong>Customer:</strong> ${invoice.customerName}</span>
-            </div>
-          ` : ''}
-          ${invoice.customerPhone ? `
-            <div class="meta-row">
-              <span><strong>Phone:</strong> ${invoice.customerPhone}</span>
-            </div>
-          ` : ''}
 
-          <div class="divider"></div>
+          <div class="divider-solid"></div>
 
-          <table>
+          <!-- Items Table -->
+          <table class="items-table">
             <thead>
               <tr>
-                <th style="text-align: left; width: 44%;">ITEM</th>
-                <th style="text-align: center; width: 14%;">QTY</th>
-                <th style="text-align: right; width: 20%;">RATE</th>
-                <th style="text-align: right; width: 22%;">TOTAL</th>
+                <th style="text-align: left; width: 44%;">Item</th>
+                <th style="text-align: center; width: 14%;">Qty.</th>
+                <th style="text-align: right; width: 20%;">Price</th>
+                <th style="text-align: right; width: 22%;">Amount</th>
               </tr>
             </thead>
             <tbody>
@@ -438,59 +395,40 @@ export function generateThermalSlipHTML(
             </tbody>
           </table>
 
-          <div class="divider"></div>
+          <div class="divider-solid"></div>
 
-          <table class="total-table">
-            <tr>
-              <td style="text-align: left; font-weight: 700;">Subtotal:</td>
-              <td style="text-align: right; font-weight: 800;">Rs.${invoice.subtotal.toFixed(2)}</td>
-            </tr>
-            ${invoice.discount > 0 ? `
-            <tr>
-              <td style="text-align: left; font-weight: 700;">Discount:</td>
-              <td style="text-align: right; font-weight: 800;">-Rs.${invoice.discount.toFixed(2)}</td>
-            </tr>` : ''}
-            ${(invoice.serviceCharges && invoice.serviceCharges > 0) ? `
-            <tr>
-              <td style="text-align: left; font-weight: 700;">Service Fee:</td>
-              <td style="text-align: right; font-weight: 800;">+Rs.${invoice.serviceCharges.toFixed(2)}</td>
-            </tr>` : ''}
-            <tr class="total-row">
-              <td style="text-align: left;">NET TOTAL:</td>
-              <td style="text-align: right;">Rs.${invoice.total.toFixed(2)}</td>
-            </tr>
-          </table>
-
-          <!-- BRANDED BACK / FOOTER SECTION (EXACT LAYERS STYLE) -->
-          <div class="layers-backside">
-            <div class="top-tag">SEE YOU AGAIN SOON</div>
-            
-            <div class="social-contact">
-              <div>f @ ${(business.businessName || 'vaypar').toLowerCase().replace(/\s+/g, '.')}</div>
-              <div>${business.phone ? `${business.phone}` : '042.111.529.377'}</div>
-              <div>${business.email || `WWW.${(business.businessName || 'VAYPAR').toUpperCase().replace(/\s+/g, '')}.PK`}</div>
-            </div>
-
-            <div class="location-tag">
-              ${business.address ? business.address.toUpperCase() : 'LAHORE | ISLAMABAD | KARACHI'}
-            </div>
-
-            <div class="main-logo-text">
-              ${(business.businessName || 'VAYPAR').toUpperCase().split('').join(' ')}
-            </div>
-
-            <div class="script-box">
-              <div class="script-thank">Thank</div>
-              <div class="script-you">You</div>
-            </div>
-
-            <div class="shopping-tag">FOR SHOPPING WITH US</div>
-
-            <div class="stars-row">★ ★ ★ ★ ★</div>
-
-            <div class="bottom-tag">SEE YOU AGAIN SOON</div>
+          <!-- Total Qty & Sub Total -->
+          <div class="summary-row">
+            <span>Total Qty: ${totalQty}</span>
+            <span>Sub Total&nbsp;&nbsp;${invoice.subtotal.toFixed(2)}</span>
           </div>
-          <br/><br/>
+
+          ${(invoice.serviceCharges && invoice.serviceCharges > 0) ? `
+          <div class="summary-sub-row">
+            <span>Service / Labor Fee</span>
+            <span>+${invoice.serviceCharges.toFixed(2)}</span>
+          </div>` : ''}
+
+          ${(invoice.discount > 0) ? `
+          <div class="summary-sub-row">
+            <span>Discount / Round off</span>
+            <span>-${invoice.discount.toFixed(2)}</span>
+          </div>` : ''}
+
+          <!-- Grand Total -->
+          <div class="grand-total-row">
+            <span>Grand Total</span>
+            <span>Rs. ${invoice.total.toFixed(2)}</span>
+          </div>
+
+          <div class="divider-solid"></div>
+
+          <!-- Footer -->
+          <div class="footer-section">
+            ${taxId ? `<div>Lic / NTN: ${taxId}</div>` : ''}
+            <div style="font-weight: 700; margin-top: 2px;">Thank You, Visit Again.</div>
+          </div>
+          <br/>
         </div>
       </body>
     </html>
