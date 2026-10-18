@@ -25,7 +25,7 @@ type Timeframe = 'daily' | 'weekly' | 'monthly' | 'annually' | 'all';
 export default function RevenueScreen() {
   const theme = useTheme();
   const { user } = useAuth();
-  const { invoices, expenses, loadingData, refreshData } = useDatabase();
+  const { invoices, expenses, returnsExchanges, loadingData, refreshData } = useDatabase();
 
   const [timeframe, setTimeframe] = useState<Timeframe>('monthly');
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,7 +40,7 @@ export default function RevenueScreen() {
   // ─── Filter data by Timeframe ─────────────────────────────────────────────
   const now = new Date();
 
-  const { filteredInvoices, filteredExpenses, periodLabel } = useMemo(() => {
+  const { filteredInvoices, filteredExpenses, filteredReturns, periodLabel } = useMemo(() => {
     let cutoff = new Date(0);
     let label = 'All Recorded History';
 
@@ -70,8 +70,13 @@ export default function RevenueScreen() {
       return new Date(exp.date || exp.lastUpdated) >= cutoff;
     });
 
-    return { filteredInvoices: finv, filteredExpenses: fexp, periodLabel: label };
-  }, [timeframe, invoices, expenses]);
+    const fret = (returnsExchanges || []).filter(ret => {
+      if (timeframe === 'all') return true;
+      return new Date(ret.createdAt) >= cutoff;
+    });
+
+    return { filteredInvoices: finv, filteredExpenses: fexp, filteredReturns: fret, periodLabel: label };
+  }, [timeframe, invoices, expenses, returnsExchanges]);
 
   // ─── Revenue & Performance Metrics ────────────────────────────────────────
   const totalRevenue = useMemo(() => {
@@ -82,7 +87,11 @@ export default function RevenueScreen() {
     return filteredExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
   }, [filteredExpenses]);
 
-  const netRevenue = totalRevenue - totalExpenseAmount;
+  const totalRefundAmount = useMemo(() => {
+    return (filteredReturns || []).reduce((sum, ret) => sum + (Number(ret.refundAmount) || 0), 0);
+  }, [filteredReturns]);
+
+  const netRevenue = totalRevenue - totalExpenseAmount - totalRefundAmount;
   const invoiceCount = filteredInvoices.length;
   const averageOrderValue = invoiceCount > 0 ? totalRevenue / invoiceCount : 0;
 
@@ -379,6 +388,26 @@ export default function RevenueScreen() {
             </Text>
           </Card>
 
+          {/* Customer Refunds */}
+          <Card style={[styles.kpiCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+            <View style={styles.kpiHeaderRow}>
+              <View style={[styles.kpiIconWrapper, { backgroundColor: '#F9731615' }]}>
+                <Ionicons name="swap-horizontal-outline" size={18} color="#F97316" />
+              </View>
+              <View style={[styles.trendBadge, { backgroundColor: '#F9731618' }]}>
+                <Ionicons name="arrow-undo-outline" size={11} color="#F97316" />
+                <Text style={[styles.trendBadgeText, { color: '#F97316' }]}>Refunds</Text>
+              </View>
+            </View>
+            <Text style={[styles.kpiLabel, { color: theme.textSecondary }]}>CUSTOMER REFUNDS</Text>
+            <Text style={[styles.kpiValue, { color: '#F97316' }]} numberOfLines={1}>
+              {totalRefundAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Text>
+            <Text style={[styles.kpiSub, { color: theme.textSecondary }]}>
+              {filteredReturns.length} cash returns processed
+            </Text>
+          </Card>
+
           {/* Net Profit */}
           <Card style={[styles.kpiCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
             <View style={styles.kpiHeaderRow}>
@@ -396,7 +425,7 @@ export default function RevenueScreen() {
               {netRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </Text>
             <Text style={[styles.kpiSub, { color: theme.textSecondary }]}>
-              After deducting operational expenses
+              After deducting expenses & cash refunds
             </Text>
           </Card>
 

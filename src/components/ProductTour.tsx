@@ -287,10 +287,10 @@ export function ProductTour() {
   if (!step) return null;
 
   // Compute pixel coords from fractions
-  const cx = step.spotlightX * SCREEN_W;
-  const cy = step.spotlightY * SCREEN_H;
-  const w  = step.spotlightW * SCREEN_W;
-  const h  = step.spotlightH * SCREEN_H;
+  const cx = (step.spotlightX ?? 0.5) * SCREEN_W;
+  const cy = (step.spotlightY ?? 0.5) * SCREEN_H;
+  const w  = (step.spotlightW ?? 0.4) * SCREEN_W;
+  const h  = (step.spotlightH ?? 0.2) * SCREEN_H;
 
   return (
     <View style={styles.container} pointerEvents="box-none">

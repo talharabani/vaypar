@@ -66,10 +66,12 @@ const TAB_CONFIG: Record<NavTab, {
   crm:        { name: 'crm',             title: 'CRM',            label: 'CRM',         icon: 'people-circle-outline',    iconFocused: 'people-circle',    hideFromRoles: ['kitchen','cook'] },
   queue:      { name: 'queue/index',     title: 'Queue',          label: 'Queue',       icon: 'people-outline',           iconFocused: 'people',           hideFromRoles: ['kitchen','cook'] },
   warranty:   { name: 'warranty/index',  title: 'Warranty',       label: 'Warranty',    icon: 'shield-checkmark-outline', iconFocused: 'shield-checkmark', hideFromRoles: ['kitchen','cook'] },
+  returns:    { name: 'returns',          title: 'Exchange & Refund', label: 'Exchange & Refund', icon: 'repeat-outline',        iconFocused: 'repeat',           hideFromRoles: ['kitchen','cook'] },
+  'services-pos': { name: 'services-pos', title: 'Personalized Services', label: 'Custom Services', icon: 'sparkles-outline',   iconFocused: 'sparkles',         hideFromRoles: ['kitchen','cook'] },
 };
 
 const ALL_TABS: NavTab[] = [
-  'index','revenue','products','bills','expenses','staff','activity','settings',
+  'index','revenue','products','bills','services-pos','returns','expenses','staff','activity','settings',
   'restaurant','udhar','grocery','pharmacy','tailor','gym','salon','crm','queue','warranty',
 ];
 
@@ -479,7 +481,7 @@ function MobileTopBar({ onMenuPress }: { onMenuPress: () => void }) {
   return (
     <View style={[styles.topBar, { backgroundColor: '#FFFFFF', borderBottomColor: theme.border }]}>
       <TouchableOpacity
-        nativeID="tour-mobile-menu"
+        id="tour-mobile-menu"
         testID="tour-mobile-menu"
         onPress={onMenuPress}
         style={styles.menuBtn}
@@ -503,7 +505,7 @@ export default function AppTabs() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const isKitchen = user?.role === 'kitchen' || user?.role === 'cook';
-  const activeTabs = new Set<NavTab>(loadingCategory ? ['index','revenue','settings','crm'] : [...category.navTabs, 'revenue', 'crm']);
+  const activeTabs = new Set<NavTab>(loadingCategory ? ['index','revenue','settings','crm','returns','services-pos'] : [...category.navTabs, 'revenue', 'crm', 'returns', 'services-pos']);
 
   function shouldHide(tabId: NavTab): boolean {
     const cfg = TAB_CONFIG[tabId];

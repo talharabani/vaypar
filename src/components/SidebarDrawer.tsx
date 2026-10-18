@@ -130,6 +130,8 @@ export function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) {
           { label: 'Smart Inventory', icon: 'cube-outline', route: '/grocery' },
           { label: 'Products Catalog', icon: 'shirt-outline', route: '/products' },
           { label: 'Sale Invoices', icon: 'receipt-outline', route: '/bills' },
+          { label: 'Custom Services', icon: 'sparkles-outline', route: '/services-pos' },
+          { label: 'Exchange & Refund', icon: 'repeat-outline', route: '/returns' },
           { label: 'Expenses Tracker', icon: 'wallet-outline', route: '/expenses' },
           { label: 'Customer CRM', icon: 'people-circle-outline', route: '/crm' },
           { label: 'Operating Reports', icon: 'bar-chart-outline', route: '/activity' },

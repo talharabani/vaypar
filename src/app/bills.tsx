@@ -23,11 +23,13 @@ import { useAuth } from '../context/AuthContext';
 import { useDatabase } from '../context/DatabaseContext';
 import { useRecentActivity } from '../context/RecentActivityContext';
 import { useTheme } from '../hooks/use-theme';
+import { useRouter } from 'expo-router';
 import { shareSalesReportPDF } from '../services/pdfGenerator';
 import * as sqlite from '../services/sqlite';
 import { validateCustomerName, validateCustomerPhone, detectCountryCode } from '../utils/phoneUtils';
 
 export default function BillsScreen() {
+  const router = useRouter();
   const { 
     products, 
     invoices, 
@@ -52,7 +54,7 @@ export default function BillsScreen() {
   const hasReportsAccess = isOwner || user?.role === 'manager';
 
   // Tab State — cashiers default to create, managers/owners to history
-  const [activeTab, setActiveTab] = useState<'history' | 'create' | 'installments' | 'returns'>(isCashier ? 'create' : 'history');
+  const [activeTab, setActiveTab] = useState<'history' | 'create' | 'installments'>(isCashier ? 'create' : 'history');
   const [billingPaymentType, setBillingPaymentType] = useState<'cash' | 'credit'>('cash');
 
   // Search History State
@@ -995,15 +997,6 @@ export default function BillsScreen() {
             </Text>
           </TouchableOpacity>
         )}
-
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'returns' && { borderBottomColor: theme.primary }]}
-          onPress={() => setActiveTab('returns')}
-        >
-          <Text style={[styles.tabText, { color: activeTab === 'returns' ? theme.primary : theme.textSecondary }]}>
-            Exchange & Return
-          </Text>
-        </TouchableOpacity>
       </View>
 
       {/* ==========================================
@@ -1821,10 +1814,8 @@ export default function BillsScreen() {
         </ScrollView>
       )}
 
-      {/* ==========================================
-          TAB 4: EXCHANGE & RETURN / REFUND LAYOUT
-          ========================================== */}
-      {activeTab === 'returns' && (
+      {/* Returns now has dedicated page at /returns accessible via sidebar */}
+      {false && (
         <ScrollView style={styles.tabContent} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
           {/* Sub-segment selector */}
           <View style={{ flexDirection: 'row', backgroundColor: theme.backgroundElement, padding: 4, borderRadius: 12, marginBottom: 16 }}>
@@ -1876,24 +1867,27 @@ export default function BillsScreen() {
                   <Text style={[styles.instSectionTitle, { color: theme.text }]}>1. Select Customer Bill / Invoice</Text>
                 </View>
 
-                {returnInvoice ? (
-                  <View style={{ padding: 12, backgroundColor: theme.primary + '10', borderRadius: 12, borderWidth: 1, borderColor: theme.primary + '30', marginBottom: 10 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ fontSize: 15, fontWeight: '800', color: theme.primary }}>
-                        Invoice #{returnInvoice.id.substring(0, 8).toUpperCase()}
+                {returnInvoice ? (() => {
+                  const inv = returnInvoice as sqlite.Invoice;
+                  return (
+                    <View style={{ padding: 12, backgroundColor: theme.primary + '10', borderRadius: 12, borderWidth: 1, borderColor: theme.primary + '30', marginBottom: 10 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 15, fontWeight: '800', color: theme.primary }}>
+                          Invoice #{inv.id.substring(0, 8).toUpperCase()}
+                        </Text>
+                        <TouchableOpacity onPress={() => { setReturnInvoice(null); setReturnItemsList([]); setReturnSelectedItemId(''); }}>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: theme.danger }}>Change Bill</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={{ color: theme.text, marginTop: 4, fontWeight: '600' }}>
+                        Customer: {inv.customerName || 'Walk-in'} {inv.customerPhone ? `(${inv.customerPhone})` : ''}
                       </Text>
-                      <TouchableOpacity onPress={() => { setReturnInvoice(null); setReturnItemsList([]); setReturnSelectedItemId(''); }}>
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: theme.danger }}>Change Bill</Text>
-                      </TouchableOpacity>
+                      <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 2 }}>
+                        Date: {new Date(inv.createdAt).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })} · Total: PKR {inv.total.toLocaleString()}
+                      </Text>
                     </View>
-                    <Text style={{ color: theme.text, marginTop: 4, fontWeight: '600' }}>
-                      Customer: {returnInvoice.customerName || 'Walk-in'} {returnInvoice.customerPhone ? `(${returnInvoice.customerPhone})` : ''}
-                    </Text>
-                    <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 2 }}>
-                      Date: {new Date(returnInvoice.createdAt).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })} · Total: PKR {returnInvoice.total.toLocaleString()}
-                    </Text>
-                  </View>
-                ) : (
+                  );
+                })() : (
                   <View>
                     <Input
                       placeholder="Search recent bills by customer name or phone..."
@@ -2727,15 +2721,9 @@ export default function BillsScreen() {
         visible={receiptVisible}
         invoice={selectedInvoice}
         items={selectedInvoiceItems}
-        onExchangeReturn={async (inv, invItems) => {
-          setReturnInvoice(inv);
-          setReturnItemsList(invItems);
-          if (invItems.length > 0) {
-            setReturnSelectedItemId(invItems[0].id);
-            setReturnQty('1');
-          }
-          setReturnsSegment('process');
-          setActiveTab('returns');
+        onExchangeReturn={async () => {
+          setReceiptVisible(false);
+          router.push('/returns' as any);
         }}
         onClose={() => {
           setReceiptVisible(false);

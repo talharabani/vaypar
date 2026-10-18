@@ -37,6 +37,12 @@ export interface TourStepDef {
   description: string;
   tip?: string;
   roles?: Array<'owner' | 'manager' | 'cashier' | 'employee'>;
+  tooltipAnchor?: 'top' | 'bottom' | 'left' | 'right';
+  emoji?: string;
+  spotlightX?: number;
+  spotlightY?: number;
+  spotlightW?: number;
+  spotlightH?: number;
 }
 
 export const GUIDED_TOUR_STEPS: TourStepDef[] = [
@@ -107,6 +113,34 @@ export const GUIDED_TOUR_STEPS: TourStepDef[] = [
 ];
 
 // ─── Modal States ─────────────────────────────────────────────────────────────
+export const TOUR_STEPS = GUIDED_TOUR_STEPS;
+
+export type ChecklistStepId =
+  | 'account_created'
+  | 'upload_logo'
+  | 'add_employee'
+  | 'add_product'
+  | 'explore_pos'
+  | 'first_sale';
+
+export interface ChecklistStep {
+  id: ChecklistStepId;
+  label: string;
+  desc?: string;
+  description?: string;
+  route?: string;
+  skippable?: boolean;
+}
+
+export const CHECKLIST_STEPS: ChecklistStep[] = [
+  { id: 'account_created', label: 'Create Account', desc: 'Signed up and verified' },
+  { id: 'upload_logo', label: 'Add Business Branding', desc: 'Upload your store logo & theme', route: '/settings' },
+  { id: 'add_employee', label: 'Add Staff Member', desc: 'Create cashier or staff profile', route: '/users' },
+  { id: 'add_product', label: 'Add First Product', desc: 'Add inventory items to catalog', route: '/products' },
+  { id: 'explore_pos', label: 'Explore POS Checkout', desc: 'Inspect POS billing interface', route: '/bills' },
+  { id: 'first_sale', label: 'Issue First Bill', desc: 'Generate a customer invoice', route: '/bills' },
+];
+
 export type TourModalState = 'idle' | 'welcome' | 'touring' | 'completed';
 
 export interface UserTourPersistedState {

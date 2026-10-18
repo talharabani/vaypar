@@ -73,7 +73,7 @@ export default function ScreenWrapper({ children, style, title, headerRight, hid
 
             {/* Search here box */}
             <TouchableOpacity
-              nativeID="tour-search"
+              id="tour-search"
               testID="tour-search"
               onPress={() => setPaletteVisible(true)}
               style={{

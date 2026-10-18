@@ -85,7 +85,9 @@ export type NavTab =
   | 'salon'
   | 'crm'
   | 'queue'
-  | 'warranty';
+  | 'warranty'
+  | 'returns'
+  | 'services-pos';
 
 export interface BusinessCategory {
   id: BusinessCategoryId;

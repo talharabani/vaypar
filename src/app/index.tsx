@@ -57,6 +57,7 @@ export default function DashboardScreen() {
     products, 
     invoices, 
     expenses, 
+    returnsExchanges,
     loadingData, 
     refreshData, 
     syncing, 
@@ -239,45 +240,64 @@ export default function DashboardScreen() {
 
   // Aggregate financial metrics
   const metrics = useMemo(() => {
-    let totalSales = 0;
+    let grossSales = 0;
     let totalExpenses = 0;
+    let totalRefunds = 0;
 
     invoices.forEach(inv => {
-      totalSales += inv.total;
+      grossSales += inv.total || 0;
     });
 
     expenses.forEach(exp => {
-      totalExpenses += exp.amount;
+      totalExpenses += exp.amount || 0;
     });
 
+    (returnsExchanges || []).forEach(ret => {
+      totalRefunds += Number(ret.refundAmount) || 0;
+    });
+
+    const totalSales = Math.max(0, grossSales - totalRefunds);
     const netProfit = totalSales - totalExpenses;
 
     return {
+      grossSales,
+      totalRefunds,
       totalSales,
       totalExpenses,
       netProfit,
     };
-  }, [invoices, expenses]);
+  }, [invoices, expenses, returnsExchanges]);
 
   // Today's POS statistics
   const todayStats = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0];
-    let todaySales = 0;
+    let grossTodaySales = 0;
     let todayInvoicesCount = 0;
+    let todayRefunds = 0;
 
     invoices.forEach(inv => {
       if (inv.createdAt.startsWith(todayStr)) {
-        todaySales += inv.total;
+        grossTodaySales += inv.total || 0;
         todayInvoicesCount++;
       }
     });
 
+    (returnsExchanges || []).forEach(ret => {
+      if (ret.createdAt.startsWith(todayStr)) {
+        todayRefunds += Number(ret.refundAmount) || 0;
+      }
+    });
+
+    const todaySales = Math.max(0, grossTodaySales - todayRefunds);
+
     return {
+      grossTodaySales,
+      todayRefunds,
       todaySales,
       todayInvoicesCount,
       totalProducts: products.length,
     };
-  }, [invoices, products]);
+  }, [invoices, products, returnsExchanges]);
 
   // Filter invoices for today
   const todayInvoices = useMemo(() => {
