@@ -100,31 +100,22 @@ export function detectCountryCode(phone?: string | null): string {
  * Ensures the name only contains valid alphabetic letters and acceptable name punctuation.
  */
 export function sanitizeCustomerName(text: string): string {
-  // Disallow numbers and special symbols except spaces, hyphens, periods, and apostrophes
-  return text.replace(/[0-9]/g, '').replace(/[^a-zA-Z\u0600-\u06FF\s.'-]/g, '');
+  // Allow letters, numbers, spaces, hyphens, periods, hashes, parentheses, apostrophes, and Urdu/Arabic
+  return text.replace(/[^\w\s.'\-#()/,\u0600-\u06FF]/gi, '');
 }
 
 /**
  * Validates a customer name:
- * - Must not contain numbers
- * - Must have at least 2 alphabetic/Urdu characters
- * - Must not be pure spaces
+ * - Must not be empty
+ * - Must have at least 2 characters
  */
 export function validateCustomerName(name: string): { isValid: boolean; error?: string } {
   const trimmed = name.trim();
   if (!trimmed) {
-    return { isValid: true }; // Empty might be optional unless required
+    return { isValid: false, error: 'Customer name is required.' };
   }
-  if (/[0-9]/.test(trimmed)) {
-    return { isValid: false, error: 'Customer name cannot contain numbers.' };
-  }
-  // Check for at least 2 letters (Latin or Arabic/Urdu)
-  const letterCount = (trimmed.match(/[a-zA-Z\u0600-\u06FF]/g) || []).length;
-  if (letterCount < 2) {
-    return { isValid: false, error: 'Name must have at least 2 letters.' };
-  }
-  if (!/^[a-zA-Z\u0600-\u06FF\s.'-]+$/.test(trimmed)) {
-    return { isValid: false, error: 'Name contains invalid characters.' };
+  if (trimmed.length < 2) {
+    return { isValid: false, error: 'Name must have at least 2 characters.' };
   }
   return { isValid: true };
 }

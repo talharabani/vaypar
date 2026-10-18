@@ -126,6 +126,7 @@ async function pushLocalChanges(userId: string, businessId: string, profile: sql
       created_by: p.createdBy || userId,
       name: p.name,
       price: p.price,
+      purchase_price: p.purchasePrice ?? 0,
       quantity: p.quantity,
       category: p.category,
       low_stock_threshold: p.lowStockThreshold,
@@ -133,7 +134,12 @@ async function pushLocalChanges(userId: string, businessId: string, profile: sql
       deleted: (p.deleted ?? 0) === 1,
     }));
 
-    const { error } = await supabase.from('products').upsert(rows);
+    let { error } = await supabase.from('products').upsert(rows);
+    if (error && (error.message?.includes('purchase_price') || (error as any).code === '42703')) {
+      const fallbackRows = rows.map(({ purchase_price, ...rest }) => rest);
+      const res = await supabase.from('products').upsert(fallbackRows);
+      error = res.error;
+    }
     if (!error) {
       for (const p of unsyncedProducts) {
         await sqlite.markProductSynced(p.id);
@@ -150,7 +156,7 @@ async function pushLocalChanges(userId: string, businessId: string, profile: sql
     for (const inv of unsyncedInvoices) {
       const items = await sqlite.getInvoiceItems(inv.id);
 
-      const { error: invError } = await supabase.from('invoices').upsert({
+      const invPayload: any = {
         id: inv.id,
         business_id: inv.businessId || businessId,
         created_by: inv.createdBy || userId,
@@ -158,11 +164,19 @@ async function pushLocalChanges(userId: string, businessId: string, profile: sql
         customer_phone: inv.customerPhone,
         subtotal: inv.subtotal,
         discount: inv.discount,
+        service_charges: inv.serviceCharges ?? 0,
         total: inv.total,
         created_at: inv.createdAt,
         last_updated: inv.lastUpdated,
         deleted: (inv.deleted ?? 0) === 1,
-      });
+      };
+
+      let { error: invError } = await supabase.from('invoices').upsert(invPayload);
+      if (invError && (invError.message?.includes('service_charges') || (invError as any).code === '42703')) {
+        delete invPayload.service_charges;
+        const res = await supabase.from('invoices').upsert(invPayload);
+        invError = res.error;
+      }
 
       if (!invError) {
         // Push items
@@ -318,6 +332,11 @@ async function pullRemoteChanges(userId: string, businessId: string) {
   if (remoteProducts && remoteProducts.length > 0) {
     console.log(`[Sync] Pulled ${remoteProducts.length} remote products`);
     for (const rp of remoteProducts) {
+      const existing = await sqlite.getProductById(rp.id);
+      const pp = (rp.purchase_price !== null && rp.purchase_price !== undefined && Number(rp.purchase_price) > 0)
+        ? Number(rp.purchase_price)
+        : (existing?.purchasePrice ?? 0);
+
       await sqlite.upsertProduct({
         id: rp.id,
         userId: userId,
@@ -325,6 +344,7 @@ async function pullRemoteChanges(userId: string, businessId: string) {
         createdBy: rp.created_by || userId,
         name: rp.name,
         price: rp.price,
+        purchasePrice: pp,
         quantity: rp.quantity,
         category: rp.category,
         lowStockThreshold: rp.low_stock_threshold ?? 5,
@@ -351,13 +371,14 @@ async function pullRemoteChanges(userId: string, businessId: string) {
     for (const ri of remoteInvoices) {
       await sqliteDB.withTransactionAsync(async () => {
         await sqliteDB.runAsync(
-          `INSERT INTO invoices (id, userId, businessId, createdBy, customerName, customerPhone, subtotal, discount, total, createdAt, synced, lastUpdated, deleted)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO invoices (id, userId, businessId, createdBy, customerName, customerPhone, subtotal, discount, serviceCharges, total, createdAt, synced, lastUpdated, deleted)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              customerName = excluded.customerName,
              customerPhone = excluded.customerPhone,
              subtotal = excluded.subtotal,
              discount = excluded.discount,
+             serviceCharges = excluded.serviceCharges,
              total = excluded.total,
              createdAt = excluded.createdAt,
              synced = excluded.synced,
@@ -366,6 +387,7 @@ async function pullRemoteChanges(userId: string, businessId: string) {
           [
             ri.id, userId, ri.business_id || businessId, ri.created_by || userId,
             ri.customer_name, ri.customer_phone, ri.subtotal, ri.discount,
+            ri.service_charges ?? 0,
             ri.total, ri.created_at, 1, ri.last_updated, ri.deleted ? 1 : 0,
           ]
         );

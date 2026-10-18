@@ -14,6 +14,7 @@ interface DatabaseContextType {
   installmentAccounts: sqlite.InstallmentAccount[];
   staffList: sqlite.UserProfile[];
   activityLogs: sqlite.ActivityLog[];
+  returnsExchanges: sqlite.ReturnExchange[];
   loadingData: boolean;
   syncing: boolean;
   networkConnected: boolean;
@@ -27,9 +28,15 @@ interface DatabaseContextType {
   deleteProduct: (id: string) => Promise<void>;
   
   // Invoice Operations
-  createInvoice: (customerName: string, customerPhone: string, subtotal: number, discount: number, total: number, items: Omit<sqlite.InvoiceItem, 'id' | 'invoiceId'>[]) => Promise<string>;
+  createInvoice: (customerName: string, customerPhone: string, subtotal: number, discount: number, total: number, items: Omit<sqlite.InvoiceItem, 'id' | 'invoiceId'>[], serviceCharges?: number) => Promise<string>;
   deleteInvoice: (id: string) => Promise<void>;
   
+  // Returns & Exchanges Operations
+  createReturnExchange: (data: Omit<sqlite.ReturnExchange, 'id' | 'businessId' | 'createdAt' | 'synced' | 'lastUpdated' | 'deleted'>) => Promise<void>;
+
+  // Customer Operations
+  addCustomer: (name: string, phone: string, address?: string, notes?: string) => Promise<sqlite.Customer>;
+
   // Expense Operations
   addExpense: (title: string, amount: number, category: string, date: string) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
@@ -59,6 +66,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
   const [installmentAccounts, setInstallmentAccounts] = useState<sqlite.InstallmentAccount[]>([]);
   const [staffList, setStaffList] = useState<sqlite.UserProfile[]>([]);
   const [activityLogs, setActivityLogs] = useState<sqlite.ActivityLog[]>([]);
+  const [returnsExchanges, setReturnsExchanges] = useState<sqlite.ReturnExchange[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [networkConnected, setNetworkConnected] = useState(true);
@@ -103,18 +111,20 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
       setInstallmentAccounts([]);
       setStaffList([]);
       setActivityLogs([]);
+      setReturnsExchanges([]);
       return;
     }
 
     setLoadingData(true);
     try {
       // Fetch core datasets scoped to the businessId
-      const [dbProducts, dbInvoices, dbExpenses, dbInstallments, dbCustomers] = await Promise.all([
+      const [dbProducts, dbInvoices, dbExpenses, dbInstallments, dbCustomers, dbReturns] = await Promise.all([
         sqlite.getProducts(user.businessId),
         sqlite.getInvoices(user.businessId),
         sqlite.getExpenses(user.businessId),
         sqlite.getInstallmentAccounts(user.businessId),
         sqlite.getCustomers(user.businessId),
+        sqlite.getReturnsExchanges(user.businessId),
       ]);
       
       setProducts(dbProducts);
@@ -122,6 +132,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
       setExpenses(dbExpenses);
       setCustomers(dbCustomers);
       setInstallmentAccounts(dbInstallments);
+      setReturnsExchanges(dbReturns);
 
       // Publish a localStorage snapshot so the public /store page can read
       // catalog data without needing the SQLite lock (which is held by this tab).
@@ -307,7 +318,8 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     subtotal: number, 
     discount: number, 
     total: number, 
-    items: Omit<sqlite.InvoiceItem, 'id' | 'invoiceId'>[]
+    items: Omit<sqlite.InvoiceItem, 'id' | 'invoiceId'>[],
+    serviceCharges: number = 0
   ) => {
     if (!user) throw new Error('Authentication required');
     
@@ -323,6 +335,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
       customerPhone,
       subtotal,
       discount,
+      serviceCharges: serviceCharges || 0,
       total,
       createdAt: now,
       synced: 0,
@@ -362,11 +375,57 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    await logActivity(`Created sales invoice for customer "${customerName || 'Walk-in'}" (Total: PKR ${total.toFixed(2)})`);
+    await logActivity(`Created sales invoice for customer "${customerName || 'Walk-in'}" (Total: PKR ${total.toFixed(2)}${serviceCharges > 0 ? `, Service Charges: PKR ${serviceCharges.toFixed(2)}` : ''})`);
     await refreshData();
     triggerSync();
     
     return invoiceId;
+  };
+
+  const createReturnExchange = async (data: Omit<sqlite.ReturnExchange, 'id' | 'businessId' | 'createdAt' | 'synced' | 'lastUpdated' | 'deleted'>) => {
+    if (!user) throw new Error('Authentication required');
+    const now = new Date().toISOString();
+    const id = 'ret_' + Math.random().toString(36).substring(2, 15);
+    const record: sqlite.ReturnExchange = {
+      ...data,
+      id,
+      businessId: user.businessId,
+      createdAt: now,
+      synced: 0,
+      lastUpdated: now,
+      deleted: 0
+    };
+
+    await sqlite.createReturnExchange(record);
+    const actionDesc = data.type === 'exchange'
+      ? `Exchanged ${data.quantity}x "${data.originalProductName}" for ${data.replacementQuantity}x "${data.replacementProductName}"`
+      : `Refunded ${data.quantity}x "${data.originalProductName}" (PKR ${(data.refundAmount || 0).toFixed(2)})`;
+    await logActivity(`Return/Exchange: ${actionDesc} for customer "${data.customerName || 'Walk-in'}"`);
+    await refreshData();
+    triggerSync();
+  };
+
+  const addCustomer = async (name: string, phone: string, address?: string, notes?: string): Promise<sqlite.Customer> => {
+    if (!user) throw new Error('Authentication required');
+    const now = new Date().toISOString();
+    const id = 'cust_' + Math.random().toString(36).substring(2, 15);
+    const newCust: sqlite.Customer = {
+      id,
+      businessId: user.businessId,
+      name: name.trim(),
+      phone: phone.trim(),
+      address: address?.trim() || '',
+      notes: notes?.trim() || '',
+      creditLimit: 0,
+      synced: 0,
+      lastUpdated: now,
+      deleted: 0
+    };
+    await sqlite.upsertCustomer(newCust);
+    await logActivity(`Created customer profile "${newCust.name}"`);
+    await refreshData();
+    triggerSync();
+    return newCust;
   };
 
   const deleteInvoice = async (id: string) => {
@@ -654,6 +713,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         installmentAccounts,
         staffList,
         activityLogs,
+        returnsExchanges,
         loadingData,
         syncing,
         networkConnected,
@@ -667,6 +727,9 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         
         createInvoice,
         deleteInvoice,
+
+        createReturnExchange,
+        addCustomer,
         
         addExpense,
         deleteExpense,

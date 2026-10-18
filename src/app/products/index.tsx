@@ -82,7 +82,7 @@ export default function ProductsScreen() {
     setEditingId(product.id);
     setName(product.name);
     setSalePrice(product.price.toString());
-    setPurchasePrice((product.purchasePrice ?? 0).toString());
+    setPurchasePrice((product.purchasePrice !== undefined && product.purchasePrice !== null && product.purchasePrice > 0) ? product.purchasePrice.toString() : '');
     setQuantity(product.quantity.toString());
     setCategory(product.category || '');
     setBoxLocation(product.boxLocation || '');
@@ -95,13 +95,13 @@ export default function ProductsScreen() {
   const handleSaveProduct = async () => {
     setFormError('');
     if (!name.trim()) { setFormError('Product name is required.'); return; }
-    const parsedSalePrice = parseFloat(salePrice);
+    const parsedSalePrice = parseFloat(salePrice.replace(/,/g, ''));
     if (isNaN(parsedSalePrice) || parsedSalePrice < 0) { setFormError('Enter a valid sale price.'); return; }
-    const parsedPurchasePrice = purchasePrice.trim() ? parseFloat(purchasePrice) : 0;
+    const parsedPurchasePrice = purchasePrice.trim() ? parseFloat(purchasePrice.replace(/,/g, '')) : 0;
     if (isNaN(parsedPurchasePrice) || parsedPurchasePrice < 0) { setFormError('Enter a valid purchase price.'); return; }
-    const parsedQty = parseInt(quantity, 10);
+    const parsedQty = parseInt(quantity.replace(/,/g, ''), 10);
     if (isNaN(parsedQty) || parsedQty < 0) { setFormError('Enter a valid stock quantity.'); return; }
-    const parsedThreshold = parseInt(lowStockThreshold, 10);
+    const parsedThreshold = parseInt(lowStockThreshold.replace(/,/g, ''), 10);
     if (isNaN(parsedThreshold) || parsedThreshold < 0) { setFormError('Enter a valid low stock limit.'); return; }
 
     try {
@@ -252,20 +252,26 @@ export default function ProductsScreen() {
                       <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Sale</Text>
                       <Text style={[styles.priceValue, { color: theme.primary }]}>PKR {item.price.toFixed(0)}</Text>
                     </View>
-                    {isOwner && pp > 0 && (
+                    {(isOwner || user?.role === 'manager' || !user?.role) && (
                       <>
                         <View style={[styles.priceDivider, { backgroundColor: theme.border }]} />
                         <View style={styles.priceBlock}>
                           <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Purchase</Text>
-                          <Text style={[styles.priceValue, { color: theme.textSecondary }]}>PKR {pp.toFixed(0)}</Text>
-                        </View>
-                        <View style={[styles.priceDivider, { backgroundColor: theme.border }]} />
-                        <View style={styles.priceBlock}>
-                          <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Profit</Text>
-                          <Text style={[styles.priceValue, { color: profit >= 0 ? theme.success : theme.danger }]}>
-                            PKR {profit.toFixed(0)}{margin !== null ? ` (${margin.toFixed(0)}%)` : ''}
+                          <Text style={[styles.priceValue, { color: theme.textSecondary }]}>
+                            {pp > 0 ? `PKR ${pp.toLocaleString('en-PK')}` : 'PKR 0'}
                           </Text>
                         </View>
+                        {pp > 0 && (
+                          <>
+                            <View style={[styles.priceDivider, { backgroundColor: theme.border }]} />
+                            <View style={styles.priceBlock}>
+                              <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Profit</Text>
+                              <Text style={[styles.priceValue, { color: profit >= 0 ? theme.success : theme.danger }]}>
+                                PKR {profit.toFixed(0)}{margin !== null ? ` (${margin.toFixed(0)}%)` : ''}
+                              </Text>
+                            </View>
+                          </>
+                        )}
                       </>
                     )}
                   </View>
@@ -359,12 +365,12 @@ export default function ProductsScreen() {
                       <Text style={[styles.sheetPriceCardVal, { color: theme.primary }]}>PKR {p.price.toLocaleString('en-PK')}</Text>
                     </View>
 
-                    {isOwner && (
+                    {(isOwner || user?.role === 'manager' || !user?.role) && (
                       <>
                         <View style={[styles.sheetPriceCard, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
                           <Text style={[styles.sheetPriceCardLabel, { color: theme.textSecondary }]}>Purchase Price</Text>
                           <Text style={[styles.sheetPriceCardVal, { color: theme.text }]}>
-                            {pp > 0 ? `PKR ${pp.toLocaleString('en-PK')}` : '—'}
+                            {pp > 0 ? `PKR ${pp.toLocaleString('en-PK')}` : 'PKR 0'}
                           </Text>
                         </View>
 
@@ -481,9 +487,9 @@ export default function ProductsScreen() {
                   </View>
                 </View>
 
-                {salePrice && purchasePrice && parseFloat(salePrice) > 0 && parseFloat(purchasePrice) > 0 ? (() => {
-                  const sp = parseFloat(salePrice) || 0;
-                  const pp2 = parseFloat(purchasePrice) || 0;
+                {salePrice && purchasePrice && parseFloat(salePrice.replace(/,/g, '')) > 0 && parseFloat(purchasePrice.replace(/,/g, '')) > 0 ? (() => {
+                  const sp = parseFloat(salePrice.replace(/,/g, '')) || 0;
+                  const pp2 = parseFloat(purchasePrice.replace(/,/g, '')) || 0;
                   const pft = sp - pp2;
                   const mgn = pp2 > 0 ? ((pft / pp2) * 100).toFixed(1) : '0';
                   const pos = pft >= 0;

@@ -38,7 +38,10 @@ export default function BillsScreen() {
     installmentAccounts,
     addInstallmentAccount,
     payInstallment,
-    deleteInstallmentAccount
+    deleteInstallmentAccount,
+    returnsExchanges,
+    createReturnExchange,
+    addCustomer
   } = useDatabase();
   const theme = useTheme();
   const { user } = useAuth();
@@ -49,7 +52,7 @@ export default function BillsScreen() {
   const hasReportsAccess = isOwner || user?.role === 'manager';
 
   // Tab State — cashiers default to create, managers/owners to history
-  const [activeTab, setActiveTab] = useState<'history' | 'create' | 'installments'>(isCashier ? 'create' : 'history');
+  const [activeTab, setActiveTab] = useState<'history' | 'create' | 'installments' | 'returns'>(isCashier ? 'create' : 'history');
   const [billingPaymentType, setBillingPaymentType] = useState<'cash' | 'credit'>('cash');
 
   // Search History State
@@ -59,6 +62,33 @@ export default function BillsScreen() {
   const [receiptVisible, setReceiptVisible] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<sqlite.Invoice | null>(null);
   const [selectedInvoiceItems, setSelectedInvoiceItems] = useState<sqlite.InvoiceItem[]>([]);
+
+  // Service Charges State
+  const [serviceChargeInput, setServiceChargeInput] = useState('');
+  const [serviceChargeType, setServiceChargeType] = useState<'amount' | 'percentage'>('amount');
+
+  // Return & Exchange states
+  const [returnsSegment, setReturnsSegment] = useState<'process' | 'history'>('process');
+  const [returnInvoice, setReturnInvoice] = useState<sqlite.Invoice | null>(null);
+  const [returnItemsList, setReturnItemsList] = useState<sqlite.InvoiceItem[]>([]);
+  const [returnSelectedItemId, setReturnSelectedItemId] = useState('');
+  const [returnQty, setReturnQty] = useState('1');
+  const [returnType, setReturnType] = useState<'return' | 'exchange'>('return');
+  const [returnCondition, setReturnCondition] = useState<'resellable' | 'damaged'>('resellable');
+  const [returnReason, setReturnReason] = useState('Customer Request');
+  const [returnReplacementProductId, setReturnReplacementProductId] = useState('');
+  const [returnReplacementQty, setReturnReplacementQty] = useState('1');
+  const [returnNotes, setReturnNotes] = useState('');
+  const [processingReturn, setProcessingReturn] = useState(false);
+  const [searchReturnInvoice, setSearchReturnInvoice] = useState('');
+  const [searchReturnsHistory, setSearchReturnsHistory] = useState('');
+
+  // Customer Directory Add Customer State
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustPhone, setNewCustPhone] = useState('');
+  const [newCustAddress, setNewCustAddress] = useState('');
+  const [addingCustomer, setAddingCustomer] = useState(false);
 
   // Installment Calculator & Plan Form
   const [instCustomer, setInstCustomer] = useState('');
@@ -329,8 +359,15 @@ export default function BillsScreen() {
   // Invoice calculations (includes profit for owner — hidden from cashiers)
   const invoiceTotals = useMemo(() => {
     const subtotal = invoiceItems.reduce((sum, item) => sum + item.total, 0);
-    const discount = parseFloat(discountInput) || 0;
-    const total = Math.max(0, subtotal - discount);
+    const discount = parseFloat(discountInput.replace(/,/g, '')) || 0;
+    const baseAfterDiscount = Math.max(0, subtotal - discount);
+
+    const scRaw = parseFloat(serviceChargeInput.replace(/,/g, '')) || 0;
+    const serviceCharges = serviceChargeType === 'percentage'
+      ? (baseAfterDiscount * scRaw) / 100
+      : scRaw;
+
+    const total = Math.max(0, baseAfterDiscount + serviceCharges);
 
     // Profit = sale price − purchase price, per item × qty (owner only)
     let totalPurchaseCost = 0;
@@ -342,8 +379,116 @@ export default function BillsScreen() {
     const grossProfit = total - totalPurchaseCost;
     const profitMargin = totalPurchaseCost > 0 ? ((grossProfit / totalPurchaseCost) * 100) : null;
 
-    return { subtotal, discount, total, totalPurchaseCost, grossProfit, profitMargin };
-  }, [invoiceItems, discountInput, products]);
+    return { subtotal, discount, serviceCharges, total, totalPurchaseCost, grossProfit, profitMargin };
+  }, [invoiceItems, discountInput, serviceChargeInput, serviceChargeType, products]);
+
+  // Return & Exchange calculations
+  const selectedReturnItem = useMemo(() => {
+    return returnItemsList.find(i => i.id === returnSelectedItemId) || null;
+  }, [returnItemsList, returnSelectedItemId]);
+
+  const selectedReplacementProduct = useMemo(() => {
+    return products.find(p => p.id === returnReplacementProductId) || null;
+  }, [products, returnReplacementProductId]);
+
+  const returnCalculations = useMemo(() => {
+    const q = parseInt(returnQty, 10) || 0;
+    const itemPrice = selectedReturnItem ? selectedReturnItem.price : 0;
+    const refundVal = q * itemPrice;
+
+    if (returnType === 'return') {
+      return {
+        refundAmount: refundVal,
+        differenceAmount: 0,
+        customerPaysExtra: 0,
+        storeRefunds: refundVal
+      };
+    }
+
+    const repQ = parseInt(returnReplacementQty, 10) || 0;
+    const repPrice = selectedReplacementProduct ? selectedReplacementProduct.price : 0;
+    const replacementVal = repQ * repPrice;
+    const diff = replacementVal - refundVal;
+
+    return {
+      refundAmount: diff < 0 ? Math.abs(diff) : 0,
+      differenceAmount: diff,
+      customerPaysExtra: diff > 0 ? diff : 0,
+      storeRefunds: diff < 0 ? Math.abs(diff) : 0
+    };
+  }, [selectedReturnItem, returnQty, returnType, selectedReplacementProduct, returnReplacementQty]);
+
+  // Process Return or Exchange
+  const handleProcessReturnExchange = async () => {
+    if (!selectedReturnItem) {
+      Alert.alert('Selection Required', 'Please select an item to return or exchange.');
+      return;
+    }
+    const q = parseInt(returnQty, 10);
+    if (isNaN(q) || q <= 0) {
+      Alert.alert('Invalid Quantity', 'Please enter a valid return quantity.');
+      return;
+    }
+    if (q > selectedReturnItem.quantity) {
+      Alert.alert('Quantity Exceeded', `Cannot return more than ${selectedReturnItem.quantity} units.`);
+      return;
+    }
+    if (returnType === 'exchange') {
+      if (!selectedReplacementProduct) {
+        Alert.alert('Replacement Required', 'Please select a replacement product from inventory.');
+        return;
+      }
+      const repQ = parseInt(returnReplacementQty, 10);
+      if (isNaN(repQ) || repQ <= 0) {
+        Alert.alert('Invalid Quantity', 'Please enter replacement product quantity.');
+        return;
+      }
+      if (repQ > selectedReplacementProduct.quantity) {
+        Alert.alert('Insufficient Stock', `Only ${selectedReplacementProduct.quantity} units of "${selectedReplacementProduct.name}" in stock.`);
+        return;
+      }
+    }
+    setProcessingReturn(true);
+    try {
+      await createReturnExchange({
+        invoiceId: returnInvoice?.id || undefined,
+        customerName: returnInvoice?.customerName || customerName.trim() || 'Customer',
+        customerPhone: returnInvoice?.customerPhone || customerPhone.trim() || '',
+        type: returnType,
+        originalProductId: selectedReturnItem.productId,
+        originalProductName: selectedReturnItem.productName,
+        quantity: q,
+        refundAmount: returnCalculations.storeRefunds,
+        replacementProductId: returnType === 'exchange' ? selectedReplacementProduct?.id : undefined,
+        replacementProductName: returnType === 'exchange' ? selectedReplacementProduct?.name : undefined,
+        replacementQuantity: returnType === 'exchange' ? parseInt(returnReplacementQty, 10) : undefined,
+        differenceAmount: returnCalculations.differenceAmount,
+        condition: returnCondition,
+        reason: returnReason,
+        notes: returnNotes.trim() || undefined,
+      });
+
+      const successMsg = returnType === 'exchange'
+        ? 'Exchange processed successfully!'
+        : 'Return & refund completed successfully!';
+      if (Platform.OS === 'web') {
+        window.alert(successMsg);
+      } else {
+        Alert.alert('Completed', successMsg);
+      }
+
+      setReturnSelectedItemId('');
+      setReturnQty('1');
+      setReturnReplacementProductId('');
+      setReturnReplacementQty('1');
+      setReturnNotes('');
+      setReturnsSegment('history');
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to process return/exchange.');
+    } finally {
+      setProcessingReturn(false);
+    }
+  };
 
   // Open Receipt Details from History
   const { logVisit } = useRecentActivity();
@@ -555,12 +700,11 @@ export default function BillsScreen() {
         invoiceTotals.subtotal,
         invoiceTotals.discount,
         invoiceTotals.total,
-        itemsPayload
+        itemsPayload,
+        invoiceTotals.serviceCharges
       );
 
       // Successfully saved! Let's retrieve the newly saved invoice to preview it
-      // Invoices state updates asynchronously, so we can fetch the latest one
-      // from the DB or look at local data
       const now = new Date().toISOString();
       const mockInvoice: sqlite.Invoice = {
         id: newInvoiceId,
@@ -571,6 +715,7 @@ export default function BillsScreen() {
         customerPhone: finalCustomerPhone,
         subtotal: invoiceTotals.subtotal,
         discount: invoiceTotals.discount,
+        serviceCharges: invoiceTotals.serviceCharges,
         total: invoiceTotals.total,
         createdAt: now,
         lastUpdated: now
@@ -585,6 +730,13 @@ export default function BillsScreen() {
         quantity: item.quantity,
         total: item.total
       }));
+
+      // Reset bill inputs
+      setInvoiceItems([]);
+      setCustomerName('');
+      setCustomerPhone('');
+      setDiscountInput('');
+      setServiceChargeInput('');
 
       // If Credit Sale: automatically record in Customer Credit Ledger
       if (billingPaymentType === 'credit' && user?.businessId) {
@@ -843,6 +995,15 @@ export default function BillsScreen() {
             </Text>
           </TouchableOpacity>
         )}
+
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'returns' && { borderBottomColor: theme.primary }]}
+          onPress={() => setActiveTab('returns')}
+        >
+          <Text style={[styles.tabText, { color: activeTab === 'returns' ? theme.primary : theme.textSecondary }]}>
+            Exchange & Return
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* ==========================================
@@ -1314,6 +1475,55 @@ export default function BillsScreen() {
               />
             </View>
 
+            {/* Service Charges Input */}
+            <View style={[styles.summaryRow, { alignItems: 'center' }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Service Charges:</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                  <TouchableOpacity
+                    onPress={() => setServiceChargeType('amount')}
+                    style={[
+                      styles.scBadge,
+                      { backgroundColor: serviceChargeType === 'amount' ? theme.primary : theme.backgroundElement, borderColor: theme.border }
+                    ]}
+                  >
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: serviceChargeType === 'amount' ? '#fff' : theme.textSecondary }}>Flat PKR</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setServiceChargeType('percentage')}
+                    style={[
+                      styles.scBadge,
+                      { backgroundColor: serviceChargeType === 'percentage' ? theme.primary : theme.backgroundElement, borderColor: theme.border }
+                    ]}
+                  >
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: serviceChargeType === 'percentage' ? '#fff' : theme.textSecondary }}>Rate %</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <TextInput
+                placeholder="0"
+                placeholderTextColor={theme.textSecondary + '80'}
+                value={serviceChargeInput}
+                onChangeText={setServiceChargeInput}
+                keyboardType="numeric"
+                style={[styles.discountInput, {
+                  color: theme.text,
+                  borderColor: theme.primary,
+                  backgroundColor: theme.backgroundElement,
+                }]}
+              />
+            </View>
+            {invoiceTotals.serviceCharges > 0 && (
+              <View style={[styles.summaryRow, { marginTop: -2, marginBottom: 4 }]}>
+                <Text style={{ fontSize: 11, color: theme.primary, fontWeight: '600' }}>
+                  Applied {serviceChargeType === 'percentage' ? `${serviceChargeInput}% Fee` : 'Service Fee'}
+                </Text>
+                <Text style={{ fontSize: 12, color: theme.primary, fontWeight: '700' }}>
+                  +PKR {invoiceTotals.serviceCharges.toFixed(2)}
+                </Text>
+              </View>
+            )}
+
             <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
             <View style={styles.summaryRow}>
@@ -1612,6 +1822,497 @@ export default function BillsScreen() {
       )}
 
       {/* ==========================================
+          TAB 4: EXCHANGE & RETURN / REFUND LAYOUT
+          ========================================== */}
+      {activeTab === 'returns' && (
+        <ScrollView style={styles.tabContent} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
+          {/* Sub-segment selector */}
+          <View style={{ flexDirection: 'row', backgroundColor: theme.backgroundElement, padding: 4, borderRadius: 12, marginBottom: 16 }}>
+            <TouchableOpacity
+              onPress={() => setReturnsSegment('process')}
+              style={{
+                flex: 1,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                paddingVertical: 10,
+                borderRadius: 8,
+                backgroundColor: returnsSegment === 'process' ? theme.primary : 'transparent',
+              }}
+            >
+              <Ionicons name="repeat-outline" size={16} color={returnsSegment === 'process' ? '#fff' : theme.textSecondary} />
+              <Text style={{ fontSize: 13, fontWeight: '700', color: returnsSegment === 'process' ? '#fff' : theme.textSecondary }}>
+                Process Return / Exchange
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setReturnsSegment('history')}
+              style={{
+                flex: 1,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                paddingVertical: 10,
+                borderRadius: 8,
+                backgroundColor: returnsSegment === 'history' ? theme.primary : 'transparent',
+              }}
+            >
+              <Ionicons name="time-outline" size={16} color={returnsSegment === 'history' ? '#fff' : theme.textSecondary} />
+              <Text style={{ fontSize: 13, fontWeight: '700', color: returnsSegment === 'history' ? '#fff' : theme.textSecondary }}>
+                Logs ({returnsExchanges.length})
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {returnsSegment === 'process' ? (
+            <View>
+              {/* Step 1: Invoice selection */}
+              <Card style={[styles.instCard, { marginBottom: 16 }]}>
+                <View style={styles.sectionHeaderRow}>
+                  <Ionicons name="receipt-outline" size={20} color={theme.primary} />
+                  <Text style={[styles.instSectionTitle, { color: theme.text }]}>1. Select Customer Bill / Invoice</Text>
+                </View>
+
+                {returnInvoice ? (
+                  <View style={{ padding: 12, backgroundColor: theme.primary + '10', borderRadius: 12, borderWidth: 1, borderColor: theme.primary + '30', marginBottom: 10 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 15, fontWeight: '800', color: theme.primary }}>
+                        Invoice #{returnInvoice.id.substring(0, 8).toUpperCase()}
+                      </Text>
+                      <TouchableOpacity onPress={() => { setReturnInvoice(null); setReturnItemsList([]); setReturnSelectedItemId(''); }}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: theme.danger }}>Change Bill</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={{ color: theme.text, marginTop: 4, fontWeight: '600' }}>
+                      Customer: {returnInvoice.customerName || 'Walk-in'} {returnInvoice.customerPhone ? `(${returnInvoice.customerPhone})` : ''}
+                    </Text>
+                    <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 2 }}>
+                      Date: {new Date(returnInvoice.createdAt).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })} · Total: PKR {returnInvoice.total.toLocaleString()}
+                    </Text>
+                  </View>
+                ) : (
+                  <View>
+                    <Input
+                      placeholder="Search recent bills by customer name or phone..."
+                      value={searchReturnInvoice}
+                      onChangeText={setSearchReturnInvoice}
+                    />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, textTransform: 'uppercase', marginBottom: 8, marginTop: 4 }}>
+                      Recent Invoices
+                    </Text>
+                    <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
+                      {invoices
+                        .filter(inv => !searchReturnInvoice || (inv.customerName || '').toLowerCase().includes(searchReturnInvoice.toLowerCase()) || (inv.customerPhone || '').includes(searchReturnInvoice) || inv.id.toLowerCase().includes(searchReturnInvoice.toLowerCase()))
+                        .slice(0, 6)
+                        .map(inv => (
+                          <TouchableOpacity
+                            key={inv.id}
+                            onPress={async () => {
+                              const itms = await sqlite.getInvoiceItems(inv.id);
+                              setReturnInvoice(inv);
+                              setReturnItemsList(itms);
+                              if (itms.length > 0) setReturnSelectedItemId(itms[0].id);
+                            }}
+                            style={{
+                              padding: 10,
+                              borderRadius: 8,
+                              backgroundColor: theme.background,
+                              borderWidth: 1,
+                              borderColor: theme.border,
+                              marginBottom: 6,
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}
+                          >
+                            <View>
+                              <Text style={{ fontWeight: '700', color: theme.text, fontSize: 13 }}>
+                                #{inv.id.substring(0, 8).toUpperCase()} · {inv.customerName || 'Walk-in'}
+                              </Text>
+                              <Text style={{ fontSize: 11, color: theme.textSecondary }}>
+                                {new Date(inv.createdAt).toLocaleDateString('en-PK', { day: 'numeric', month: 'short' })} {inv.customerPhone ? `· ${inv.customerPhone}` : ''}
+                              </Text>
+                            </View>
+                            <Text style={{ fontWeight: '700', color: theme.primary, fontSize: 13 }}>
+                              PKR {inv.total.toLocaleString()}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                  </View>
+                )}
+              </Card>
+
+              {/* Step 2: Item to return */}
+              <Card style={[styles.instCard, { marginBottom: 16 }]}>
+                <View style={styles.sectionHeaderRow}>
+                  <Ionicons name="cube-outline" size={20} color={theme.primary} />
+                  <Text style={[styles.instSectionTitle, { color: theme.text }]}>2. Select Purchased Item to Return</Text>
+                </View>
+
+                {returnItemsList.length > 0 ? (
+                  <View style={{ gap: 8 }}>
+                    {returnItemsList.map(item => {
+                      const isSel = returnSelectedItemId === item.id;
+                      return (
+                        <TouchableOpacity
+                          key={item.id}
+                          onPress={() => { setReturnSelectedItemId(item.id); setReturnQty('1'); }}
+                          style={{
+                            padding: 12,
+                            borderRadius: 10,
+                            borderWidth: 1.5,
+                            borderColor: isSel ? theme.primary : theme.border,
+                            backgroundColor: isSel ? theme.primary + '10' : theme.background,
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontWeight: '700', color: theme.text, fontSize: 14 }}>{item.productName}</Text>
+                            <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+                              Purchased: {item.quantity} units @ PKR {item.price.toLocaleString()} each
+                            </Text>
+                          </View>
+                          <Ionicons name={isSel ? "radio-button-on" : "radio-button-off"} size={20} color={isSel ? theme.primary : theme.textSecondary} />
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    <View style={{ marginTop: 8 }}>
+                      <Input
+                        label={`Return Quantity (Max: ${selectedReturnItem?.quantity || 1})`}
+                        value={returnQty}
+                        onChangeText={setReturnQty}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={{ color: theme.textSecondary, textAlign: 'center', paddingVertical: 12 }}>
+                    Please select an invoice above to view its items.
+                  </Text>
+                )}
+              </Card>
+
+              {/* Step 3: Action Type — Exchange vs Refund */}
+              <Card style={[styles.instCard, { marginBottom: 16 }]}>
+                <View style={styles.sectionHeaderRow}>
+                  <Ionicons name="swap-horizontal-outline" size={20} color={theme.primary} />
+                  <Text style={[styles.instSectionTitle, { color: theme.text }]}>3. Action Type & Policy Check</Text>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+                  <TouchableOpacity
+                    onPress={() => setReturnType('return')}
+                    style={{
+                      flex: 1,
+                      padding: 12,
+                      borderRadius: 10,
+                      borderWidth: 1.5,
+                      borderColor: returnType === 'return' ? theme.danger : theme.border,
+                      backgroundColor: returnType === 'return' ? theme.danger + '12' : theme.background,
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    <Ionicons name="cash-outline" size={22} color={returnType === 'return' ? theme.danger : theme.textSecondary} />
+                    <Text style={{ fontWeight: '700', fontSize: 13, color: returnType === 'return' ? theme.danger : theme.text }}>
+                      Return & Refund
+                    </Text>
+                    <Text style={{ fontSize: 10, color: theme.textSecondary }}>Refund cash / credit</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => setReturnType('exchange')}
+                    style={{
+                      flex: 1,
+                      padding: 12,
+                      borderRadius: 10,
+                      borderWidth: 1.5,
+                      borderColor: returnType === 'exchange' ? theme.primary : theme.border,
+                      backgroundColor: returnType === 'exchange' ? theme.primary + '12' : theme.background,
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    <Ionicons name="repeat-outline" size={22} color={returnType === 'exchange' ? theme.primary : theme.textSecondary} />
+                    <Text style={{ fontWeight: '700', fontSize: 13, color: returnType === 'exchange' ? theme.primary : theme.text }}>
+                      Product Exchange
+                    </Text>
+                    <Text style={{ fontSize: 10, color: theme.textSecondary }}>Swap with other item</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* If Exchange: Select replacement product */}
+                {returnType === 'exchange' && (
+                  <View style={{ marginBottom: 14 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text, marginBottom: 6 }}>
+                      Select Replacement Product from Store:
+                    </Text>
+                    <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
+                      {products
+                        .filter(p => p.id !== selectedReturnItem?.productId && p.quantity > 0)
+                        .slice(0, 10)
+                        .map(p => {
+                          const isSel = returnReplacementProductId === p.id;
+                          return (
+                            <TouchableOpacity
+                              key={p.id}
+                              onPress={() => setReturnReplacementProductId(p.id)}
+                              style={{
+                                padding: 10,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: isSel ? theme.primary : theme.border,
+                                backgroundColor: isSel ? theme.primary + '10' : theme.background,
+                                marginBottom: 6,
+                                flexDirection: 'row',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                              }}
+                            >
+                              <View>
+                                <Text style={{ fontWeight: '700', color: theme.text, fontSize: 13 }}>{p.name}</Text>
+                                <Text style={{ fontSize: 11, color: theme.textSecondary }}>In Stock: {p.quantity} units</Text>
+                              </View>
+                              <Text style={{ fontWeight: '700', color: theme.primary, fontSize: 13 }}>PKR {p.price.toLocaleString()}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                    </ScrollView>
+
+                    <View style={{ marginTop: 8 }}>
+                      <Input
+                        label="Replacement Quantity"
+                        value={returnReplacementQty}
+                        onChangeText={setReturnReplacementQty}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+                )}
+
+                {/* Product Condition — as highlighted in user image */}
+                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text, marginBottom: 6, marginTop: 4 }}>
+                  Product Condition (Eligibility Check):
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                  <TouchableOpacity
+                    onPress={() => setReturnCondition('resellable')}
+                    style={{
+                      flex: 1,
+                      padding: 10,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: returnCondition === 'resellable' ? theme.success : theme.border,
+                      backgroundColor: returnCondition === 'resellable' ? theme.success + '15' : theme.background,
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Text style={{ fontWeight: '700', fontSize: 12, color: returnCondition === 'resellable' ? theme.success : theme.text }}>
+                      📦 Good / Resellable
+                    </Text>
+                    <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>Restores back to stock</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => setReturnCondition('damaged')}
+                    style={{
+                      flex: 1,
+                      padding: 10,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: returnCondition === 'damaged' ? theme.danger : theme.border,
+                      backgroundColor: returnCondition === 'damaged' ? theme.danger + '15' : theme.background,
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Text style={{ fontWeight: '700', fontSize: 12, color: returnCondition === 'damaged' ? theme.danger : theme.text }}>
+                      ⚠️ Defective / Damaged
+                    </Text>
+                    <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>Does not add to stock</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Reason tags */}
+                <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text, marginBottom: 6 }}>Return Reason:</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  {['Size / Fitting Issue', 'Defective / Damaged', 'Customer Mind Change', 'Wrong Item Delivered', 'Service Dissatisfaction'].map(r => (
+                    <TouchableOpacity
+                      key={r}
+                      onPress={() => setReturnReason(r)}
+                      style={{
+                        paddingHorizontal: 10,
+                        paddingVertical: 5,
+                        borderRadius: 16,
+                        borderWidth: 1,
+                        borderColor: returnReason === r ? theme.primary : theme.border,
+                        backgroundColor: returnReason === r ? theme.primaryLight : theme.background,
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: returnReason === r ? theme.primary : theme.textSecondary }}>
+                        {r}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Input
+                  label="Additional Notes / Remarks"
+                  placeholder="Optional details..."
+                  value={returnNotes}
+                  onChangeText={setReturnNotes}
+                />
+
+                {/* Summary calculation breakdown */}
+                <View style={[styles.calcOutputBox, { backgroundColor: theme.background, borderColor: theme.border, marginTop: 14 }]}>
+                  <Text style={[styles.calcTitle, { color: theme.textSecondary }]}>Settlement Summary</Text>
+                  <View style={styles.calcRow}>
+                    <Text style={{ color: theme.textSecondary }}>Returned Items Value:</Text>
+                    <Text style={{ fontWeight: '700', color: theme.text }}>
+                      PKR {((parseInt(returnQty, 10) || 0) * (selectedReturnItem?.price || 0)).toFixed(2)}
+                    </Text>
+                  </View>
+                  {returnType === 'exchange' && (
+                    <>
+                      <View style={styles.calcRow}>
+                        <Text style={{ color: theme.textSecondary }}>Replacement Product Value:</Text>
+                        <Text style={{ fontWeight: '700', color: theme.text }}>
+                          PKR {((parseInt(returnReplacementQty, 10) || 0) * (selectedReplacementProduct?.price || 0)).toFixed(2)}
+                        </Text>
+                      </View>
+                      <View style={[styles.divider, { backgroundColor: theme.border, marginVertical: 6 }]} />
+                      <View style={styles.calcRow}>
+                        <Text style={{ fontWeight: '800', color: theme.text }}>
+                          {returnCalculations.customerPaysExtra > 0 ? 'Customer Pays Extra:' : returnCalculations.storeRefunds > 0 ? 'Store Refunds to Customer:' : 'Balance Difference:'}
+                        </Text>
+                        <Text style={{ fontWeight: '800', fontSize: 16, color: returnCalculations.customerPaysExtra > 0 ? theme.primary : theme.success }}>
+                          PKR {Math.abs(returnCalculations.differenceAmount).toFixed(2)}
+                        </Text>
+                      </View>
+                    </>
+                  )}
+                  {returnType === 'return' && (
+                    <>
+                      <View style={[styles.divider, { backgroundColor: theme.border, marginVertical: 6 }]} />
+                      <View style={styles.calcRow}>
+                        <Text style={{ fontWeight: '800', color: theme.danger }}>Total Refund Amount:</Text>
+                        <Text style={{ fontWeight: '800', fontSize: 16, color: theme.danger }}>
+                          PKR {returnCalculations.refundAmount.toFixed(2)}
+                        </Text>
+                      </View>
+                    </>
+                  )}
+                </View>
+
+                <Button
+                  title={returnType === 'exchange' ? 'Confirm Product Exchange' : 'Confirm Return & Refund'}
+                  variant="primary"
+                  size="large"
+                  onPress={handleProcessReturnExchange}
+                  loading={processingReturn}
+                  style={{ marginTop: 8 }}
+                />
+              </Card>
+            </View>
+          ) : (
+            /* History view */
+            <View>
+              <View style={[styles.searchInputRow, { backgroundColor: theme.background, borderColor: theme.border, marginBottom: 14 }]}>
+                <Ionicons name="search" size={18} color={theme.textSecondary} />
+                <Input
+                  placeholder="Search logs by customer, item, or ID..."
+                  value={searchReturnsHistory}
+                  onChangeText={setSearchReturnsHistory}
+                  style={styles.searchInput}
+                  containerStyle={styles.searchInputContainer}
+                />
+              </View>
+
+              {returnsExchanges.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="repeat-outline" size={54} color={theme.textSecondary + '60'} />
+                  <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+                    No returns or exchanges processed yet.
+                  </Text>
+                </View>
+              ) : (
+                returnsExchanges
+                  .filter(r => {
+                    const q = searchReturnsHistory.toLowerCase();
+                    return !q ||
+                      (r.customerName || '').toLowerCase().includes(q) ||
+                      (r.customerPhone || '').includes(q) ||
+                      r.originalProductName.toLowerCase().includes(q) ||
+                      (r.replacementProductName || '').toLowerCase().includes(q);
+                  })
+                  .map(rec => {
+                    const isEx = rec.type === 'exchange';
+                    return (
+                      <Card key={rec.id} style={{ marginBottom: 12, padding: 14 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <View style={{
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                            borderRadius: 6,
+                            backgroundColor: isEx ? theme.primary + '18' : theme.danger + '18',
+                          }}>
+                            <Text style={{ fontSize: 11, fontWeight: '800', color: isEx ? theme.primary : theme.danger, textTransform: 'uppercase' }}>
+                              {isEx ? 'Exchange' : 'Return & Refund'}
+                            </Text>
+                          </View>
+                          <Text style={{ fontSize: 11, color: theme.textSecondary }}>
+                            {new Date(rec.createdAt).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </Text>
+                        </View>
+
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>
+                          Customer: {rec.customerName || 'Walk-in'} {rec.customerPhone ? `(${rec.customerPhone})` : ''}
+                        </Text>
+                        {rec.invoiceId && (
+                          <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 1 }}>
+                            Invoice Ref: #{rec.invoiceId.replace(/^inv_/i, '').toUpperCase()}
+                          </Text>
+                        )}
+
+                        <View style={{ marginVertical: 8, padding: 8, backgroundColor: theme.background, borderRadius: 8 }}>
+                          <Text style={{ fontSize: 12, color: theme.text, fontWeight: '600' }}>
+                            Returned: {rec.quantity}x {rec.originalProductName}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: rec.condition === 'resellable' ? theme.success : theme.danger, marginTop: 2 }}>
+                            Condition: {rec.condition === 'resellable' ? 'Restocked to Inventory' : 'Damaged (Not Restocked)'}
+                          </Text>
+
+                          {isEx && rec.replacementProductName && (
+                            <Text style={{ fontSize: 12, color: theme.primary, fontWeight: '700', marginTop: 4 }}>
+                              Replacement: {rec.replacementQuantity}x {rec.replacementProductName}
+                            </Text>
+                          )}
+                        </View>
+
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 12, color: theme.textSecondary }}>
+                            Reason: {rec.reason || 'Customer request'}
+                          </Text>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: isEx ? theme.primary : theme.danger }}>
+                            {isEx ? (rec.differenceAmount ? (rec.differenceAmount > 0 ? `+PKR ${rec.differenceAmount.toFixed(0)}` : `-PKR ${Math.abs(rec.differenceAmount).toFixed(0)}`) : 'Even Exchange') : `Refund: PKR ${(rec.refundAmount || 0).toFixed(0)}`}
+                          </Text>
+                        </View>
+                      </Card>
+                    );
+                  })
+              )}
+            </View>
+          )}
+        </ScrollView>
+      )}
+
+      {/* ==========================================
           INSTALLMENT PAYMENT HISTORY & LOGGER MODAL
           ========================================== */}
       <Modal
@@ -1740,17 +2441,101 @@ export default function BillsScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Search Customers Bar */}
-            <View style={[styles.pickerSearch, { backgroundColor: theme.background, borderColor: theme.border, marginBottom: 12 }]}>
-              <Ionicons name="search" size={18} color={theme.textSecondary} />
-              <Input
-                placeholder="Search by name or mobile number..."
-                value={customerDirectorySearch}
-                onChangeText={setCustomerDirectorySearch}
-                style={styles.pickerSearchInput}
-                containerStyle={styles.pickerSearchInputContainer}
-              />
+            {/* Search Customers Bar + Add Customer */}
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+              <View style={[styles.pickerSearch, { backgroundColor: theme.background, borderColor: theme.border, flex: 1 }]}>
+                <Ionicons name="search" size={18} color={theme.textSecondary} />
+                <Input
+                  placeholder="Search by name or mobile number..."
+                  value={customerDirectorySearch}
+                  onChangeText={setCustomerDirectorySearch}
+                  style={styles.pickerSearchInput}
+                  containerStyle={styles.pickerSearchInputContainer}
+                />
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowAddCustomerModal(true)}
+                style={{
+                  backgroundColor: theme.primary,
+                  paddingHorizontal: 12,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexDirection: 'row',
+                  gap: 4
+                }}
+              >
+                <Ionicons name="person-add-outline" size={16} color="#fff" />
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>+ New</Text>
+              </TouchableOpacity>
             </View>
+
+            {/* Quick Add Customer Modal */}
+            {showAddCustomerModal && (
+              <Card style={{ marginBottom: 12, borderColor: theme.primary, borderWidth: 1.5, padding: 12 }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text, marginBottom: 8 }}>
+                  Create Customer Profile
+                </Text>
+                <Input
+                  label="Customer Name *"
+                  placeholder="e.g. Ahmed Raza / Shop 4"
+                  value={newCustName}
+                  onChangeText={setNewCustName}
+                />
+                <Input
+                  label="Customer Mobile"
+                  placeholder="e.g. 03001234567"
+                  value={newCustPhone}
+                  onChangeText={setNewCustPhone}
+                  keyboardType="phone-pad"
+                />
+                <Input
+                  label="Address / Area (Optional)"
+                  placeholder="e.g. Saddar, Karachi"
+                  value={newCustAddress}
+                  onChangeText={setNewCustAddress}
+                />
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  <Button
+                    title="Cancel"
+                    variant="outline"
+                    size="small"
+                    onPress={() => setShowAddCustomerModal(false)}
+                    style={{ flex: 1 }}
+                  />
+                  <Button
+                    title="Save Customer"
+                    variant="primary"
+                    size="small"
+                    onPress={async () => {
+                      if (!newCustName.trim()) {
+                        Alert.alert('Required', 'Please enter customer name');
+                        return;
+                      }
+                      setAddingCustomer(true);
+                      try {
+                        const added = await addCustomer(newCustName, newCustPhone, newCustAddress);
+                        setCustomerName(added.name);
+                        setCustomerPhone(added.phone);
+                        setShowAddCustomerModal(false);
+                        setCustomerDirectoryModalVisible(false);
+                        setNewCustName('');
+                        setNewCustPhone('');
+                        setNewCustAddress('');
+                        if (Platform.OS === 'web') window.alert('Customer profile created successfully!');
+                        else Alert.alert('Success', 'Customer profile created successfully!');
+                      } catch (e: any) {
+                        Alert.alert('Error', e.message || 'Failed to create customer');
+                      } finally {
+                        setAddingCustomer(false);
+                      }
+                    }}
+                    loading={addingCustomer}
+                    style={{ flex: 1.5 }}
+                  />
+                </View>
+              </Card>
+            )}
 
             {/* Customer List */}
             <FlatList
@@ -1942,6 +2727,16 @@ export default function BillsScreen() {
         visible={receiptVisible}
         invoice={selectedInvoice}
         items={selectedInvoiceItems}
+        onExchangeReturn={async (inv, invItems) => {
+          setReturnInvoice(inv);
+          setReturnItemsList(invItems);
+          if (invItems.length > 0) {
+            setReturnSelectedItemId(invItems[0].id);
+            setReturnQty('1');
+          }
+          setReturnsSegment('process');
+          setActiveTab('returns');
+        }}
         onClose={() => {
           setReceiptVisible(false);
           setSelectedInvoice(null);
@@ -2437,5 +3232,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 4,
+  },
+  scBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
   },
 });

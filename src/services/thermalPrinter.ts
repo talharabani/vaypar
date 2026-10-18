@@ -152,6 +152,11 @@ export function generateThermalReceipt(
     addLine(discStr.padStart(32, ' '), COMMANDS.ALIGN_RIGHT);
   }
 
+  if (invoice.serviceCharges && invoice.serviceCharges > 0) {
+    const scStr = `Service Fee: +Rs.${invoice.serviceCharges.toFixed(2)}`;
+    addLine(scStr.padStart(32, ' '), COMMANDS.ALIGN_RIGHT);
+  }
+
   // Total (Bold, aligned right)
   const totalStr = `NET TOTAL: Rs.${invoice.total.toFixed(2)}`;
   plainLines.push(`[BOLD, RIGHT] ${totalStr}`);
@@ -364,6 +369,11 @@ export function generateThermalSlipHTML(
             <tr>
               <td style="text-align: left; font-weight: 600;">Discount:</td>
               <td style="text-align: right; font-weight: 700;">-Rs.${invoice.discount.toFixed(2)}</td>
+            </tr>` : ''}
+            ${(invoice.serviceCharges && invoice.serviceCharges > 0) ? `
+            <tr>
+              <td style="text-align: left; font-weight: 600;">Service Fee:</td>
+              <td style="text-align: right; font-weight: 700; color: #1b4998;">+Rs.${invoice.serviceCharges.toFixed(2)}</td>
             </tr>` : ''}
             <tr class="total-row">
               <td style="text-align: left;">NET TOTAL:</td>

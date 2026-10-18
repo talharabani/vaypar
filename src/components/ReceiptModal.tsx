@@ -29,6 +29,7 @@ interface ReceiptModalProps {
   invoice: Invoice | null;
   items: InvoiceItem[];
   onClose: () => void;
+  onExchangeReturn?: (invoice: Invoice, items: InvoiceItem[]) => void;
 }
 
 const MOCK_PRINTERS = [
@@ -37,7 +38,7 @@ const MOCK_PRINTERS = [
   'Star L200 Mobile POS'
 ];
 
-export function ReceiptModal({ visible, invoice, items, onClose }: ReceiptModalProps) {
+export function ReceiptModal({ visible, invoice, items, onClose, onExchangeReturn }: ReceiptModalProps) {
   const { user } = useAuth();
   const theme = useTheme();
   const router = useRouter();
@@ -491,6 +492,21 @@ export function ReceiptModal({ visible, invoice, items, onClose }: ReceiptModalP
                   onPress={handleAddToUdhar}
                   style={{ marginTop: 10 }}
                 />
+
+                {/* Exchange / Return Button */}
+                {onExchangeReturn && (
+                  <Button
+                    title="Exchange / Return Items"
+                    variant="outline"
+                    size="medium"
+                    icon={<Ionicons name="repeat-outline" size={18} color={theme.primary} />}
+                    onPress={() => {
+                      onClose();
+                      onExchangeReturn(invoice, items);
+                    }}
+                    style={{ marginTop: 10, borderColor: theme.primary }}
+                  />
+                )}
               </View>
 
             </View>

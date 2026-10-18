@@ -34,19 +34,14 @@ export function CustomerNameInput({
 }: CustomerNameInputProps) {
   const theme = useTheme();
   const [isFocused, setIsFocused] = useState(false);
-  const [numWarning, setNumWarning] = useState(false);
 
   const handleChangeText = (text: string) => {
-    if (/[0-9]/.test(text)) {
-      setNumWarning(true);
-      setTimeout(() => setNumWarning(false), 3000);
-    }
     const clean = sanitizeCustomerName(text);
     onChangeText(clean);
   };
 
   const validation = value ? validateCustomerName(value) : { isValid: true, error: undefined };
-  const displayError = customError || (numWarning ? 'Numbers are not allowed in customer name.' : (value && !validation.isValid ? validation.error : undefined));
+  const displayError = customError || (value && !validation.isValid ? validation.error : undefined);
 
   return (
     <View style={[styles.container, containerStyle]}>

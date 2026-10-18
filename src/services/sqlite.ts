@@ -122,7 +122,32 @@ export interface Invoice {
   customerPhone: string;
   subtotal: number;
   discount: number;
+  serviceCharges?: number;
   total: number;
+  createdAt: string;
+  synced?: number;
+  lastUpdated: string;
+  deleted?: number;
+}
+
+export interface ReturnExchange {
+  id: string;
+  businessId: string;
+  invoiceId?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  type: 'return' | 'exchange'; // 'return' (refund) or 'exchange'
+  originalProductId: string;
+  originalProductName: string;
+  quantity: number;
+  refundAmount?: number;
+  replacementProductId?: string | null;
+  replacementProductName?: string | null;
+  replacementQuantity?: number;
+  differenceAmount?: number;
+  condition: 'resellable' | 'damaged';
+  reason?: string | null;
+  notes?: string | null;
   createdAt: string;
   synced?: number;
   lastUpdated: string;
@@ -322,6 +347,7 @@ async function initializeDatabase(db: SQLite.SQLiteDatabase) {
       customerPhone TEXT,
       subtotal REAL DEFAULT 0,
       discount REAL DEFAULT 0,
+      serviceCharges REAL DEFAULT 0,
       total REAL DEFAULT 0,
       createdAt TEXT,
       synced INTEGER DEFAULT 0,
@@ -412,6 +438,30 @@ async function initializeDatabase(db: SQLite.SQLiteDatabase) {
       synced INTEGER DEFAULT 0,
       lastUpdated TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS returns_exchanges (
+      id TEXT PRIMARY KEY,
+      businessId TEXT NOT NULL,
+      invoiceId TEXT,
+      customerName TEXT,
+      customerPhone TEXT,
+      type TEXT NOT NULL,
+      originalProductId TEXT NOT NULL,
+      originalProductName TEXT NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      refundAmount REAL DEFAULT 0,
+      replacementProductId TEXT,
+      replacementProductName TEXT,
+      replacementQuantity INTEGER DEFAULT 0,
+      differenceAmount REAL DEFAULT 0,
+      condition TEXT DEFAULT 'resellable',
+      reason TEXT,
+      notes TEXT,
+      createdAt TEXT,
+      synced INTEGER DEFAULT 0,
+      lastUpdated TEXT,
+      deleted INTEGER DEFAULT 0
+    );
   `);
 
   // Alter tables dynamically to support multi-user scoping
@@ -455,6 +505,9 @@ async function initializeDatabase(db: SQLite.SQLiteDatabase) {
     }
     if (!invoicesInfo.some(col => col.name === 'createdBy')) {
       await db.execAsync("ALTER TABLE invoices ADD COLUMN createdBy TEXT;");
+    }
+    if (!invoicesInfo.some(col => col.name === 'serviceCharges')) {
+      await db.execAsync("ALTER TABLE invoices ADD COLUMN serviceCharges REAL DEFAULT 0;");
     }
   } catch (e) { console.error("invoices ALTER error:", e); }
 
@@ -826,8 +879,8 @@ export async function createInvoice(invoice: Invoice, items: InvoiceItem[]): Pro
   await db.withTransactionAsync(async () => {
     // Insert invoice
     await db.runAsync(
-      `INSERT INTO invoices (id, userId, businessId, createdBy, customerName, customerPhone, subtotal, discount, total, createdAt, synced, lastUpdated, deleted)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO invoices (id, userId, businessId, createdBy, customerName, customerPhone, subtotal, discount, serviceCharges, total, createdAt, synced, lastUpdated, deleted)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         invoice.id,
         invoice.userId,
@@ -837,6 +890,7 @@ export async function createInvoice(invoice: Invoice, items: InvoiceItem[]): Pro
         invoice.customerPhone,
         invoice.subtotal,
         invoice.discount,
+        invoice.serviceCharges ?? 0,
         invoice.total,
         invoice.createdAt,
         invoice.synced ?? 0,
@@ -900,6 +954,82 @@ export async function softDeleteInvoice(id: string, userId: string): Promise<voi
       );
     }
   });
+}
+
+// ==========================================
+// RETURNS & EXCHANGES CRUD
+// ==========================================
+
+export async function getReturnsExchanges(businessId: string): Promise<ReturnExchange[]> {
+  const db = await getDB();
+  return await db.getAllAsync<ReturnExchange>(
+    'SELECT * FROM returns_exchanges WHERE businessId = ? AND (deleted = 0 OR deleted IS NULL) ORDER BY createdAt DESC',
+    [businessId]
+  );
+}
+
+export async function createReturnExchange(record: ReturnExchange): Promise<void> {
+  const db = await getDB();
+  const now = new Date().toISOString();
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `INSERT INTO returns_exchanges (
+        id, businessId, invoiceId, customerName, customerPhone, type,
+        originalProductId, originalProductName, quantity, refundAmount,
+        replacementProductId, replacementProductName, replacementQuantity,
+        differenceAmount, condition, reason, notes, createdAt, synced, lastUpdated, deleted
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.id,
+        record.businessId,
+        record.invoiceId || null,
+        record.customerName || '',
+        record.customerPhone || '',
+        record.type,
+        record.originalProductId,
+        record.originalProductName,
+        record.quantity,
+        record.refundAmount || 0,
+        record.replacementProductId || null,
+        record.replacementProductName || null,
+        record.replacementQuantity || 0,
+        record.differenceAmount || 0,
+        record.condition || 'resellable',
+        record.reason || '',
+        record.notes || '',
+        record.createdAt || now,
+        record.synced ?? 0,
+        record.lastUpdated || now,
+        record.deleted ?? 0
+      ]
+    );
+
+    // If resellable, restore quantity of original product
+    if (record.condition === 'resellable') {
+      await db.runAsync(
+        'UPDATE products SET quantity = quantity + ?, synced = 0, lastUpdated = ? WHERE id = ?',
+        [record.quantity, now, record.originalProductId]
+      );
+    }
+
+    // If exchange, deduct replacement quantity from inventory
+    if (record.type === 'exchange' && record.replacementProductId && (record.replacementQuantity || 0) > 0) {
+      await db.runAsync(
+        'UPDATE products SET quantity = quantity - ?, synced = 0, lastUpdated = ? WHERE id = ?',
+        [record.replacementQuantity || 0, now, record.replacementProductId]
+      );
+    }
+  });
+}
+
+export async function softDeleteReturnExchange(id: string): Promise<void> {
+  const db = await getDB();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    'UPDATE returns_exchanges SET deleted = 1, synced = 0, lastUpdated = ? WHERE id = ?',
+    [now, id]
+  );
 }
 
 // ==========================================

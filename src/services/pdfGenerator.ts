@@ -583,6 +583,11 @@ export function generateInvoiceHTML({
                           <td>DISCOUNT:</td>
                           <td style="font-weight: 700; color: #DC2626;">-PKR ${invoice.discount.toFixed(2)}</td>
                         </tr>` : ''}
+                        ${(invoice.serviceCharges && invoice.serviceCharges > 0) ? `
+                        <tr>
+                          <td>SERVICE CHARGES:</td>
+                          <td style="font-weight: 700; color: #1b4998;">+PKR ${invoice.serviceCharges.toFixed(2)}</td>
+                        </tr>` : ''}
                         <tr class="total-row">
                           <td>TOTAL:</td>
                           <td>PKR ${invoice.total.toFixed(2)}</td>

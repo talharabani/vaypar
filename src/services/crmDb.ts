@@ -1,4 +1,4 @@
-import { getDB } from './sqlite';
+import { getDB, upsertCustomer, getCustomers, Customer } from './sqlite';
 
 export interface CrmCustomer {
   id: string;
@@ -82,22 +82,86 @@ export async function initCrmTables(): Promise<void> {
 
 // ─── CRUD Operations for CRM Customers ──────────────────────────────────────
 export async function getCrmCustomers(businessId: string): Promise<CrmCustomer[]> {
+  try {
+    await initCrmTables();
+  } catch {}
   const db = await getDB();
-  return db.getAllAsync<CrmCustomer>(
-    'SELECT * FROM crm_customers WHERE businessId = ? AND deleted = 0 ORDER BY name ASC',
+  const crmList = await db.getAllAsync<CrmCustomer>(
+    'SELECT * FROM crm_customers WHERE businessId = ? AND (deleted = 0 OR deleted IS NULL) ORDER BY name ASC',
     [businessId]
   );
+
+  // Merge with core directory customers so all customers show up
+  try {
+    const coreCustomers = await getCustomers(businessId);
+    const existingPhones = new Set(crmList.map(c => (c.phone || '').trim()).filter(Boolean));
+    const existingIds = new Set(crmList.map(c => c.id));
+
+    for (const core of coreCustomers) {
+      const cleanPhone = (core.phone || '').trim();
+      if (!existingIds.has(core.id) && (!cleanPhone || !existingPhones.has(cleanPhone))) {
+        crmList.push({
+          id: core.id,
+          businessId: core.businessId,
+          name: core.name,
+          phone: core.phone || '',
+          email: '',
+          address: core.address || '',
+          birthday: '',
+          notes: core.notes || '',
+          tags: 'Customer',
+          rating: 5,
+          isVip: 0,
+          loyaltyPoints: 0,
+          favoriteProductIds: '',
+          synced: core.synced ?? 0,
+          lastUpdated: core.lastUpdated,
+          deleted: 0
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('[CRM] Failed to merge core customers:', e);
+  }
+
+  return crmList;
 }
 
 export async function getCrmCustomerById(id: string): Promise<CrmCustomer | null> {
   const db = await getDB();
-  return db.getFirstAsync<CrmCustomer>(
+  const crm = await db.getFirstAsync<CrmCustomer>(
     'SELECT * FROM crm_customers WHERE id = ?',
     [id]
   );
+  if (crm) return crm;
+
+  // Fallback to core customers
+  const core = await db.getFirstAsync<Customer>('SELECT * FROM customers WHERE id = ?', [id]);
+  if (core) {
+    return {
+      id: core.id,
+      businessId: core.businessId,
+      name: core.name,
+      phone: core.phone || '',
+      email: '',
+      address: core.address || '',
+      birthday: '',
+      notes: core.notes || '',
+      tags: 'Customer',
+      rating: 5,
+      isVip: 0,
+      loyaltyPoints: 0,
+      favoriteProductIds: '',
+      synced: core.synced ?? 0,
+      lastUpdated: core.lastUpdated,
+      deleted: 0
+    };
+  }
+  return null;
 }
 
 export async function upsertCrmCustomer(customer: CrmCustomer): Promise<void> {
+  await initCrmTables();
   const db = await getDB();
   await db.runAsync(
     `INSERT INTO crm_customers (id, businessId, name, phone, email, address, birthday, notes, tags, rating, isVip, loyaltyPoints, favoriteProductIds, synced, lastUpdated, deleted)
@@ -125,6 +189,24 @@ export async function upsertCrmCustomer(customer: CrmCustomer): Promise<void> {
       customer.deleted ?? 0
     ]
   );
+
+  // Mirror to core SQLite customers table so it's instantly available in Billing/Udhar & cloud synced
+  try {
+    await upsertCustomer({
+      id: customer.id,
+      businessId: customer.businessId,
+      name: customer.name,
+      phone: customer.phone,
+      address: customer.address,
+      notes: customer.notes,
+      creditLimit: 0,
+      synced: 0,
+      lastUpdated: customer.lastUpdated,
+      deleted: customer.deleted ?? 0
+    });
+  } catch (err) {
+    console.warn('[CRM] Mirror to customers table warning:', err);
+  }
 }
 
 export async function deleteCrmCustomer(id: string): Promise<void> {

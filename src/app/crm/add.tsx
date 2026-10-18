@@ -17,7 +17,7 @@ export default function AddCustomerScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { user } = useAuth();
-  const businessId = user?.businessId ?? '';
+  const businessId = user?.businessId || user?.id || 'default_business';
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -35,12 +35,15 @@ export default function AddCustomerScreen() {
 
   const handleSubmit = async () => {
     if (!name.trim()) {
-      Alert.alert('Required', 'Please enter customer name');
+      if (Platform.OS === 'web') window.alert('Please enter customer name');
+      else Alert.alert('Required', 'Please enter customer name');
       return;
     }
     const nameVal = validateCustomerName(name);
     if (!nameVal.isValid) {
-      Alert.alert('Invalid Name', nameVal.error || 'Name cannot contain numbers.');
+      const errMsg = nameVal.error || 'Please enter a valid customer name';
+      if (Platform.OS === 'web') window.alert(errMsg);
+      else Alert.alert('Invalid Name', errMsg);
       return;
     }
 
@@ -48,7 +51,9 @@ export default function AddCustomerScreen() {
     if (phone.trim()) {
       const phoneVal = validateCustomerPhone(phone, countryCode);
       if (!phoneVal.isValid) {
-        Alert.alert('Invalid Phone', phoneVal.error || 'Please enter a valid phone number.');
+        const errMsg = phoneVal.error || 'Please enter a valid phone number.';
+        if (Platform.OS === 'web') window.alert(errMsg);
+        else Alert.alert('Invalid Phone', errMsg);
         return;
       }
       finalPhone = phoneVal.fullPhone;
@@ -61,14 +66,14 @@ export default function AddCustomerScreen() {
 
       await crmDb.upsertCrmCustomer({
         id,
-        businessId,
+        businessId: businessId || 'default_business',
         name: name.trim(),
         phone: finalPhone,
         email: email.trim(),
         address: address.trim(),
         birthday: birthday.trim(),
         notes: notes.trim(),
-        tags: tags.trim(),
+        tags: tags.trim() || 'Customer',
         rating,
         isVip: isVip ? 1 : 0,
         loyaltyPoints: 0,
@@ -78,11 +83,21 @@ export default function AddCustomerScreen() {
         deleted: 0
       });
 
-      Alert.alert('Success', 'Customer profile registered successfully!', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to register customer');
+      if (Platform.OS === 'web') {
+        window.alert('Customer profile registered successfully!');
+        router.back();
+      } else {
+        Alert.alert('Success', 'Customer profile registered successfully!', [
+          { text: 'OK', onPress: () => router.back() }
+        ]);
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to register customer';
+      if (Platform.OS === 'web') {
+        window.alert(`Error: ${msg}`);
+      } else {
+        Alert.alert('Error', msg);
+      }
     } finally {
       setSubmitting(false);
     }
