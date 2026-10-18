@@ -167,10 +167,17 @@ export function generateThermalReceipt(
   byteArrays.push(COMMANDS.BOLD_OFF);
 
   addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
-
-  // 8. Footer
+  addLine(`* ${(busName || 'VAYPAR').toUpperCase()} *`, COMMANDS.ALIGN_CENTER);
+  addLine('Smart Retail Point of Sale', COMMANDS.ALIGN_CENTER);
+  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
+  addLine('RETURN & EXCHANGE POLICY:', COMMANDS.ALIGN_CENTER);
+  addLine('Exchange within 7 days with slip', COMMANDS.ALIGN_CENTER);
+  addLine('Tags intact & resellable condition', COMMANDS.ALIGN_CENTER);
+  addLine('No refund on discounted items', COMMANDS.ALIGN_CENTER);
+  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
+  addLine(`INVOICE: #${cleanId}`, COMMANDS.ALIGN_CENTER);
   addLine('THANK YOU FOR YOUR VISIT!', COMMANDS.ALIGN_CENTER);
-  addLine('Powered by Vaypar Multi-Biz', COMMANDS.ALIGN_CENTER);
+  addLine('PLEASE VISIT AGAIN!', COMMANDS.ALIGN_CENTER);
 
   // Feeds and paper cut
   byteArrays.push(COMMANDS.LINE_FEED);
@@ -211,10 +218,10 @@ export function generateThermalSlipHTML(
 
   const itemsRows = items.map(item => `
     <tr>
-      <td style="text-align: left; padding: 3px 0; word-break: break-word; font-weight: 600;">${item.productName}</td>
-      <td style="text-align: center; padding: 3px 0; font-weight: 600;">${item.quantity}</td>
-      <td style="text-align: right; padding: 3px 0;">${item.price.toFixed(0)}</td>
-      <td style="text-align: right; padding: 3px 0; font-weight: 800;">${item.total.toFixed(0)}</td>
+      <td style="text-align: left; padding: 4px 0; word-break: break-word; font-weight: 700; color: #000;">${item.productName}</td>
+      <td style="text-align: center; padding: 4px 0; font-weight: 700; color: #000;">${item.quantity}</td>
+      <td style="text-align: right; padding: 4px 0; font-weight: 600; color: #000;">${item.price.toFixed(0)}</td>
+      <td style="text-align: right; padding: 4px 0; font-weight: 900; color: #000;">${item.total.toFixed(0)}</td>
     </tr>
   `).join('');
 
@@ -231,23 +238,23 @@ export function generateThermalSlipHTML(
           }
           * {
             box-sizing: border-box;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           html, body {
-            width: 100%;
-            margin: 0;
-            padding: 0;
-            background: #ffffff;
-            color: #000000;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
           }
           .receipt {
-            width: ${contentWidthMm};
-            max-width: 100%;
+            width: ${contentWidthMm} !important;
+            max-width: ${contentWidthMm} !important;
             margin: 0 auto;
-            padding: ${is58mm ? '3mm 1mm' : '5mm 2mm'};
+            padding: ${is58mm ? '4mm 1mm' : '6mm 2mm'};
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            font-size: ${is58mm ? '13px' : '15px'};
+            font-size: ${is58mm ? '12px' : '14px'};
             line-height: 1.35;
             color: #000000;
           }
@@ -261,11 +268,13 @@ export function generateThermalSlipHTML(
             text-transform: uppercase;
             letter-spacing: 0.5px;
             line-height: 1.2;
+            color: #000000;
           }
           .sub {
             font-size: ${is58mm ? '11px' : '13px'};
             margin: 2px 0;
-            font-weight: 500;
+            font-weight: 600;
+            color: #000000;
           }
           .divider {
             border-top: 1.5px dashed #000000;
@@ -273,47 +282,118 @@ export function generateThermalSlipHTML(
           }
           .meta-row {
             margin: 2px 0;
-            font-size: ${is58mm ? '12px' : '14px'};
+            font-size: ${is58mm ? '11px' : '13px'};
             display: flex;
             justify-content: space-between;
+            color: #000000;
           }
           table {
             width: 100%;
             border-collapse: collapse;
             font-size: inherit;
             margin: 4px 0;
+            color: #000000;
           }
           th {
             border-bottom: 1.5px dashed #000000;
             padding: 4px 0;
             font-size: ${is58mm ? '11px' : '13px'};
-            font-weight: 800;
+            font-weight: 900;
             text-transform: uppercase;
+            color: #000000;
           }
           td {
             padding: 3px 0;
             vertical-align: top;
+            color: #000000;
           }
           .total-table {
             width: 100%;
             margin-top: 4px;
+            color: #000000;
           }
           .total-row td {
             font-size: ${is58mm ? '16px' : '20px'};
             font-weight: 900;
             padding-top: 5px;
+            color: #000000;
           }
-          .footer-section {
-            margin-top: 10px;
+
+          /* LAYERS BAKESHOP STYLE LUXURY FOOTER / BACKSIDE BRANDING */
+          .layers-backside {
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1.5px dashed #000000;
             text-align: center;
+            color: #000000;
           }
-          .footer-thanks {
-            font-size: ${is58mm ? '13px' : '15px'};
-            font-weight: 800;
-          }
-          .footer-sub {
+          .top-tag {
             font-size: ${is58mm ? '10px' : '12px'};
-            margin-top: 2px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+          }
+          .social-contact {
+            font-size: ${is58mm ? '9px' : '11px'};
+            font-weight: 600;
+            line-height: 1.4;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+          }
+          .location-tag {
+            font-size: ${is58mm ? '8px' : '10px'};
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+          }
+          .main-logo-text {
+            font-size: ${is58mm ? '18px' : '24px'};
+            font-weight: 900;
+            letter-spacing: 4px;
+            margin: 8px 0 12px 0;
+            text-transform: uppercase;
+          }
+          .script-box {
+            margin: 6px 0;
+            line-height: 0.85;
+          }
+          .script-thank {
+            font-family: 'Playfair Display', 'Brush Script MT', 'Georgia', cursive, serif;
+            font-size: ${is58mm ? '38px' : '52px'};
+            font-style: italic;
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: #000000;
+          }
+          .script-you {
+            font-family: 'Playfair Display', 'Brush Script MT', 'Georgia', cursive, serif;
+            font-size: ${is58mm ? '40px' : '54px'};
+            font-style: italic;
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: #000000;
+            margin-top: -6px;
+          }
+          .shopping-tag {
+            font-size: ${is58mm ? '10px' : '12px'};
+            font-weight: 900;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-top: 10px;
+          }
+          .stars-row {
+            font-size: ${is58mm ? '13px' : '16px'};
+            letter-spacing: 3px;
+            margin: 8px 0;
+          }
+          .bottom-tag {
+            font-size: ${is58mm ? '10px' : '12px'};
+            font-weight: 800;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-top: 4px;
           }
         </style>
       </head>
@@ -362,18 +442,18 @@ export function generateThermalSlipHTML(
 
           <table class="total-table">
             <tr>
-              <td style="text-align: left; font-weight: 600;">Subtotal:</td>
-              <td style="text-align: right; font-weight: 700;">Rs.${invoice.subtotal.toFixed(2)}</td>
+              <td style="text-align: left; font-weight: 700;">Subtotal:</td>
+              <td style="text-align: right; font-weight: 800;">Rs.${invoice.subtotal.toFixed(2)}</td>
             </tr>
             ${invoice.discount > 0 ? `
             <tr>
-              <td style="text-align: left; font-weight: 600;">Discount:</td>
-              <td style="text-align: right; font-weight: 700;">-Rs.${invoice.discount.toFixed(2)}</td>
+              <td style="text-align: left; font-weight: 700;">Discount:</td>
+              <td style="text-align: right; font-weight: 800;">-Rs.${invoice.discount.toFixed(2)}</td>
             </tr>` : ''}
             ${(invoice.serviceCharges && invoice.serviceCharges > 0) ? `
             <tr>
-              <td style="text-align: left; font-weight: 600;">Service Fee:</td>
-              <td style="text-align: right; font-weight: 700; color: #1b4998;">+Rs.${invoice.serviceCharges.toFixed(2)}</td>
+              <td style="text-align: left; font-weight: 700;">Service Fee:</td>
+              <td style="text-align: right; font-weight: 800;">+Rs.${invoice.serviceCharges.toFixed(2)}</td>
             </tr>` : ''}
             <tr class="total-row">
               <td style="text-align: left;">NET TOTAL:</td>
@@ -381,17 +461,271 @@ export function generateThermalSlipHTML(
             </tr>
           </table>
 
-          <div class="divider"></div>
+          <!-- BRANDED BACK / FOOTER SECTION (EXACT LAYERS STYLE) -->
+          <div class="layers-backside">
+            <div class="top-tag">SEE YOU AGAIN SOON</div>
+            
+            <div class="social-contact">
+              <div>f @ ${(business.businessName || 'vaypar').toLowerCase().replace(/\s+/g, '.')}</div>
+              <div>${business.phone ? `${business.phone}` : '042.111.529.377'}</div>
+              <div>${business.email || `WWW.${(business.businessName || 'VAYPAR').toUpperCase().replace(/\s+/g, '')}.PK`}</div>
+            </div>
 
-          <div class="footer-section">
-            <div class="footer-thanks">THANK YOU FOR YOUR VISIT!</div>
-            <div class="footer-sub">Powered by Vaypar POS</div>
+            <div class="location-tag">
+              ${business.address ? business.address.toUpperCase() : 'LAHORE | ISLAMABAD | KARACHI'}
+            </div>
+
+            <div class="main-logo-text">
+              ${(business.businessName || 'VAYPAR').toUpperCase().split('').join(' ')}
+            </div>
+
+            <div class="script-box">
+              <div class="script-thank">Thank</div>
+              <div class="script-you">You</div>
+            </div>
+
+            <div class="shopping-tag">FOR SHOPPING WITH US</div>
+
+            <div class="stars-row">★ ★ ★ ★ ★</div>
+
+            <div class="bottom-tag">SEE YOU AGAIN SOON</div>
           </div>
           <br/><br/>
         </div>
       </body>
     </html>
   `;
+}
+
+/**
+ * Generates exact Layers Bakeshop style Luxury Backside Branding Slip
+ */
+export function generateThermalBacksideHTML(
+  business: Partial<UserSession>,
+  paperWidth: '58mm' | '80mm' = '80mm'
+): string {
+  const is58mm = paperWidth === '58mm';
+  const widthMm = is58mm ? '58mm' : '80mm';
+  const contentWidthMm = is58mm ? '54mm' : '76mm';
+  const busName = (business.businessName || 'MY BUSINESS').toUpperCase();
+  const spacedName = busName.split('').join(' ');
+  const socialHandle = (business.businessName || 'vaypar').toLowerCase().replace(/\s+/g, '.');
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Backside Branding - ${busName}</title>
+        <style>
+          @page {
+            size: ${widthMm} auto;
+            margin: 0mm;
+          }
+          * {
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          html, body {
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+          }
+          .backside-container {
+            width: ${contentWidthMm} !important;
+            max-width: ${contentWidthMm} !important;
+            margin: 0 auto;
+            padding: ${is58mm ? '6mm 2mm' : '10mm 4mm'};
+            text-align: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Georgia, serif;
+            color: #000000;
+          }
+          .top-tag {
+            font-size: ${is58mm ? '10px' : '12px'};
+            font-weight: 800;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            margin-bottom: 18px;
+            color: #000000;
+          }
+          .social-block {
+            font-size: ${is58mm ? '9px' : '11px'};
+            font-weight: 700;
+            line-height: 1.5;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            color: #000000;
+          }
+          .address-block {
+            font-size: ${is58mm ? '8.5px' : '10.5px'};
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-bottom: 14px;
+            color: #000000;
+          }
+          .brand-logo-title {
+            font-size: ${is58mm ? '18px' : '25px'};
+            font-weight: 900;
+            letter-spacing: ${is58mm ? '4px' : '6px'};
+            margin: 12px 0 20px 0;
+            text-transform: uppercase;
+            color: #000000;
+          }
+          .thank-you-script-container {
+            margin: 10px 0 14px 0;
+            line-height: 0.85;
+          }
+          .script-thank {
+            font-family: 'Playfair Display', 'Brush Script MT', 'Georgia', cursive, serif;
+            font-size: ${is58mm ? '44px' : '58px'};
+            font-style: italic;
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: #000000;
+          }
+          .script-you {
+            font-family: 'Playfair Display', 'Brush Script MT', 'Georgia', cursive, serif;
+            font-size: ${is58mm ? '46px' : '60px'};
+            font-style: italic;
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: #000000;
+            margin-top: -6px;
+          }
+          .shopping-tag {
+            font-size: ${is58mm ? '10px' : '12px'};
+            font-weight: 900;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-top: 14px;
+            color: #000000;
+          }
+          .stars-row {
+            font-size: ${is58mm ? '14px' : '18px'};
+            letter-spacing: 4px;
+            margin: 10px 0;
+            color: #000000;
+          }
+          .bottom-tag {
+            font-size: ${is58mm ? '10px' : '12px'};
+            font-weight: 800;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            margin-top: 6px;
+            color: #000000;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="backside-container">
+          <div class="top-tag">SEE YOU AGAIN SOON</div>
+          
+          <div class="social-block">
+            <div>f @ ${socialHandle}</div>
+            <div>${business.phone ? `${business.phone}` : '042.111.529.377'}</div>
+            <div>${business.email || `WWW.${busName.replace(/\s+/g, '')}.PK`}</div>
+          </div>
+
+          <div class="address-block">
+            ${business.address ? business.address.toUpperCase() : 'LAHORE | ISLAMABAD | KARACHI'}
+          </div>
+
+          <div class="brand-logo-title">
+            ${spacedName}
+          </div>
+
+          <div class="thank-you-script-container">
+            <div class="script-thank">Thank</div>
+            <div class="script-you">You</div>
+          </div>
+
+          <div class="shopping-tag">FOR SHOPPING WITH US</div>
+
+          <div class="stars-row">★ ★ ★ ★ ★</div>
+
+          <div class="bottom-tag">SEE YOU AGAIN SOON</div>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+/**
+ * Prints the standalone luxury backside branding slip
+ */
+export async function printThermalBacksideSlip(
+  business: Partial<UserSession>,
+  paperWidth: '58mm' | '80mm' = '80mm'
+): Promise<void> {
+  const html = generateThermalBacksideHTML(business, paperWidth);
+
+  if (Platform.OS === 'web') {
+    try {
+      const existing = document.getElementById('thermal-print-iframe');
+      if (existing) {
+        existing.remove();
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.id = 'thermal-print-iframe';
+      iframe.style.position = 'fixed';
+      iframe.style.left = '-9999px';
+      iframe.style.top = '0px';
+      iframe.style.width = paperWidth === '58mm' ? '300px' : '400px';
+      iframe.style.height = '1200px';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0.01';
+      iframe.style.pointerEvents = 'none';
+      iframe.style.zIndex = '-999';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow?.document;
+      if (doc) {
+        doc.open();
+        doc.write(html);
+        doc.close();
+
+        setTimeout(() => {
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+          } catch (err) {
+            openThermalPrintWindow(html);
+          }
+        }, 350);
+        return;
+      }
+    } catch (e) {
+      openThermalPrintWindow(html);
+      return;
+    }
+    return;
+  }
+
+  await Print.printAsync({ html });
+}
+
+/**
+ * Open printable popup window fallback
+ */
+export function openThermalPrintWindow(html: string) {
+  if (typeof window === 'undefined') return;
+  const printWin = window.open('', '_blank', 'width=450,height=750,menubar=no,toolbar=no,location=no,status=no');
+  if (printWin) {
+    printWin.document.open();
+    printWin.document.write(html);
+    printWin.document.close();
+    setTimeout(() => {
+      printWin.focus();
+      printWin.print();
+    }, 350);
+  } else {
+    Alert.alert('Popup Blocked', 'Please allow popups for this site to preview and print thermal receipts.');
+  }
 }
 
 /**
@@ -406,47 +740,49 @@ export async function printThermalSlip(
   const html = generateThermalSlipHTML(business, invoice, items, paperWidth);
 
   if (Platform.OS === 'web') {
-    // 1. Try hidden iframe printing for instant silent print dialog with zero popups
+    // 1. Hidden off-screen iframe with real POS roll dimensions (avoids Chrome 0x0 viewport blank bug)
     try {
-      let iframe = document.getElementById('thermal-print-iframe') as HTMLIFrameElement;
-      if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.id = 'thermal-print-iframe';
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
-        iframe.style.border = '0';
-        document.body.appendChild(iframe);
+      const existing = document.getElementById('thermal-print-iframe');
+      if (existing) {
+        existing.remove();
       }
+
+      const iframe = document.createElement('iframe');
+      iframe.id = 'thermal-print-iframe';
+      // Real dimensions placed offscreen so Chrome layout engine renders fonts & styles properly
+      iframe.style.position = 'fixed';
+      iframe.style.left = '-9999px';
+      iframe.style.top = '0px';
+      iframe.style.width = paperWidth === '58mm' ? '300px' : '400px';
+      iframe.style.height = '1200px';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0.01';
+      iframe.style.pointerEvents = 'none';
+      iframe.style.zIndex = '-999';
+      document.body.appendChild(iframe);
 
       const doc = iframe.contentWindow?.document;
       if (doc) {
         doc.open();
         doc.write(html);
         doc.close();
+
+        // Wait 350ms to ensure full layout pass before print dialog
         setTimeout(() => {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        }, 200);
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+          } catch (err) {
+            console.warn('Iframe print failed, opening popup window:', err);
+            openThermalPrintWindow(html);
+          }
+        }, 350);
         return;
       }
     } catch (e) {
       console.warn('Iframe print error, falling back to window:', e);
-    }
-
-    // 2. Fallback to clean print window
-    const printWin = window.open('', '_blank', 'width=400,height=650');
-    if (printWin) {
-      printWin.document.write(html);
-      printWin.document.close();
-      setTimeout(() => {
-        printWin.focus();
-        printWin.print();
-      }, 250);
-    } else {
-      Alert.alert('Popup Blocked', 'Please allow popups for this site to print receipts.');
+      openThermalPrintWindow(html);
+      return;
     }
     return;
   }

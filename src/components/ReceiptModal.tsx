@@ -19,7 +19,7 @@ import { useTheme } from '../hooks/use-theme';
 import { shareInvoicePDF } from '../services/pdfGenerator';
 import * as sqlite from '../services/sqlite';
 import { Invoice, InvoiceItem } from '../services/sqlite';
-import { generateThermalReceipt, printThermalSlip, printViaWebBluetooth, simulatePrint } from '../services/thermalPrinter';
+import { generateThermalBacksideHTML, generateThermalReceipt, generateThermalSlipHTML, openThermalPrintWindow, printThermalBacksideSlip, printThermalSlip, printViaWebBluetooth, simulatePrint } from '../services/thermalPrinter';
 import { openWhatsAppInvoice, copyWhatsAppInvoiceToClipboard } from '../utils/invoiceShare';
 import { Button } from './Button';
 import { Card } from './Card';
@@ -392,6 +392,40 @@ export function ReceiptModal({ visible, invoice, items, onClose, onExchangeRetur
                       style={{ flex: 0.9 }}
                       icon={<Ionicons name="bluetooth" size={16} color={theme.primary} />}
                     />
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                    <Button
+                      title="Print Backside (Branding Slip)"
+                      variant="outline"
+                      size="small"
+                      onPress={async () => {
+                        try {
+                          await printThermalBacksideSlip(user, paperWidth);
+                          setSuccessMessage('Backside branding sent to printer!');
+                          setPrintSuccess(true);
+                          setTimeout(() => setPrintSuccess(false), 3500);
+                        } catch (e: any) {
+                          Alert.alert('Print Error', e.message || 'Could not print backside slip.');
+                        }
+                      }}
+                      style={{ flex: 1.1, borderColor: '#D97706' }}
+                      icon={<Ionicons name="sparkles" size={14} color="#D97706" />}
+                    />
+
+                    {Platform.OS === 'web' && (
+                      <Button
+                        title="Preview Slip"
+                        variant="secondary"
+                        size="small"
+                        onPress={() => {
+                          const html = generateThermalSlipHTML(user, invoice, items, paperWidth);
+                          openThermalPrintWindow(html);
+                        }}
+                        style={{ flex: 0.9 }}
+                        icon={<Ionicons name="open-outline" size={14} color={theme.text} />}
+                      />
+                    )}
                   </View>
 
                   {printSuccess && (
