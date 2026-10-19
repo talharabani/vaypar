@@ -53,8 +53,25 @@ export default function BillsScreen() {
 
   // Role helpers
   const isCashier = user?.role === 'cashier';
-  const isOwner = user?.role === 'owner';
+  const isOwner = user?.role === 'owner' || !user?.role;
   const hasReportsAccess = isOwner || user?.role === 'manager';
+  const canViewProfit = isOwner || user?.role === 'manager';
+
+  // Robust purchase price extractor helper that parses numeric/string/snake_case/camelCase
+  const getProductPurchasePrice = (prod: any): number => {
+    if (!prod) return 0;
+    const raw = prod.purchasePrice ?? 
+                prod.purchase_price ?? 
+                prod.costPrice ?? 
+                prod.cost_price ?? 
+                prod.buyingPrice ?? 
+                prod.buying_price;
+    if (raw === undefined || raw === null || raw === '') return 0;
+    if (typeof raw === 'number') return isNaN(raw) ? 0 : raw;
+    const cleaned = String(raw).replace(/,/g, '').trim();
+    const parsed = parseFloat(cleaned);
+    return isNaN(parsed) ? 0 : parsed;
+  };
 
   // Tab State — cashiers default to create, managers/owners to history
   const [activeTab, setActiveTab] = useState<'history' | 'create' | 'customers' | 'installments'>(isCashier ? 'create' : 'history');
@@ -338,6 +355,7 @@ export default function BillsScreen() {
     productId: string;
     productName: string;
     price: number;
+    purchasePrice?: number;
     quantity: number;
     total: number;
   }[]>([]);
@@ -376,11 +394,20 @@ export default function BillsScreen() {
 
     const total = Math.max(0, baseAfterDiscount + serviceCharges);
 
-    // Profit = sale price − purchase price, per item × qty (owner only)
+    // Profit = sale price − purchase price, per item × qty (owner/manager view)
     let totalPurchaseCost = 0;
     for (const item of invoiceItems) {
-      const dbProduct = products.find(p => p.id === item.productId);
-      const pp = dbProduct?.purchasePrice ?? 0;
+      let pp = (typeof item.purchasePrice === 'number' && item.purchasePrice > 0)
+        ? item.purchasePrice
+        : 0;
+
+      if (pp <= 0) {
+        const dbProduct = products.find(p => 
+          (p.id && item.productId && String(p.id).trim() === String(item.productId).trim()) ||
+          (p.name && item.productName && p.name.trim().toLowerCase() === item.productName.trim().toLowerCase())
+        );
+        pp = getProductPurchasePrice(dbProduct);
+      }
       totalPurchaseCost += pp * item.quantity;
     }
     const grossProfit = total - totalPurchaseCost;
@@ -593,16 +620,18 @@ export default function BillsScreen() {
     }
 
     // Check if product already exists in invoice items
-    const existingIndex = invoiceItems.findIndex(item => item.productId === selectedProduct.id);
+    const existingIndex = invoiceItems.findIndex(item => String(item.productId) === String(selectedProduct.id));
     const itemTotal = price * qty;
+    const purchaseCost = getProductPurchasePrice(selectedProduct);
 
     if (existingIndex > -1) {
       // Overwrite/update existing row
       const updated = [...invoiceItems];
       updated[existingIndex] = {
-        productId: selectedProduct.id,
+        productId: String(selectedProduct.id),
         productName: selectedProduct.name,
         price,
+        purchasePrice: purchaseCost,
         quantity: qty,
         total: itemTotal
       };
@@ -612,9 +641,10 @@ export default function BillsScreen() {
       setInvoiceItems([
         ...invoiceItems,
         {
-          productId: selectedProduct.id,
+          productId: String(selectedProduct.id),
           productName: selectedProduct.name,
           price,
+          purchasePrice: purchaseCost,
           quantity: qty,
           total: itemTotal
         }
@@ -1461,28 +1491,47 @@ export default function BillsScreen() {
                   <View style={styles.thAction} />
                 </View>
 
-                {invoiceItems.map((item, idx) => (
-                  <View key={item.productId} style={[styles.tableRow, { borderBottomColor: theme.border }]}>
-                    <Text style={[styles.tdName, { color: theme.text }]} numberOfLines={1}>
-                      {item.productName}
-                    </Text>
-                    <Text style={[styles.tdQty, { color: theme.text }]}>
-                      {item.quantity}
-                    </Text>
-                    <Text style={[styles.tdPrice, { color: theme.text }]}>
-                      PKR {item.price.toFixed(0)}
-                    </Text>
-                    <Text style={[styles.tdTotal, { color: theme.text, fontWeight: '700' }]}>
-                      PKR {item.total.toFixed(0)}
-                    </Text>
-                    <TouchableOpacity 
-                      style={styles.tdAction}
-                      onPress={() => handleRemoveItem(idx)}
-                    >
-                      <Ionicons name="trash-outline" size={16} color={theme.danger} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
+                {invoiceItems.map((item, idx) => {
+                  const itemPp = (typeof item.purchasePrice === 'number' && item.purchasePrice > 0)
+                    ? item.purchasePrice
+                    : (() => {
+                        const dbP = products.find(p => 
+                          (p.id && item.productId && String(p.id).trim() === String(item.productId).trim()) ||
+                          (p.name && item.productName && p.name.trim().toLowerCase() === item.productName.trim().toLowerCase())
+                        );
+                        return getProductPurchasePrice(dbP);
+                      })();
+
+                  return (
+                    <View key={`${item.productId}_${idx}`} style={[styles.tableRow, { borderBottomColor: theme.border }]}>
+                      <View style={{ flex: 1.5, paddingRight: 6 }}>
+                        <Text style={[styles.tdName, { color: theme.text, flex: 0 }]} numberOfLines={1}>
+                          {item.productName}
+                        </Text>
+                        {canViewProfit && itemPp > 0 && (
+                          <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2, fontWeight: '600' }}>
+                            Cost: PKR {itemPp.toLocaleString('en-PK')} {item.price > itemPp ? `(+PKR ${(item.price - itemPp).toLocaleString('en-PK')})` : ''}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={[styles.tdQty, { color: theme.text }]}>
+                        {item.quantity}
+                      </Text>
+                      <Text style={[styles.tdPrice, { color: theme.text }]}>
+                        PKR {item.price.toLocaleString('en-PK')}
+                      </Text>
+                      <Text style={[styles.tdTotal, { color: theme.text, fontWeight: '700' }]}>
+                        PKR {item.total.toLocaleString('en-PK')}
+                      </Text>
+                      <TouchableOpacity 
+                        style={styles.tdAction}
+                        onPress={() => handleRemoveItem(idx)}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={theme.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
               </View>
             )}
           </Card>
@@ -1569,7 +1618,7 @@ export default function BillsScreen() {
             </View>
 
             {/* ── Owner-only profit breakdown ── */}
-            {isOwner && invoiceItems.length > 0 && (
+            {canViewProfit && invoiceItems.length > 0 && (
               <View style={[styles.profitBox, { backgroundColor: invoiceTotals.grossProfit >= 0 ? theme.success + '10' : theme.danger + '10', borderColor: invoiceTotals.grossProfit >= 0 ? theme.success + '40' : theme.danger + '40' }]}>
                 <View style={styles.profitHeaderRow}>
                   <Ionicons name="lock-closed-outline" size={13} color={theme.textSecondary} />
@@ -1577,29 +1626,44 @@ export default function BillsScreen() {
                 </View>
                 <View style={styles.profitRow}>
                   <Text style={[styles.profitLabel, { color: theme.textSecondary }]}>Total Purchase Cost</Text>
-                  <Text style={[styles.profitVal, { color: theme.text }]}>PKR {invoiceTotals.totalPurchaseCost.toFixed(0)}</Text>
+                  <Text style={[styles.profitVal, { color: theme.text }]}>PKR {invoiceTotals.totalPurchaseCost.toLocaleString('en-PK')}</Text>
                 </View>
                 <View style={styles.profitRow}>
                   <Text style={[styles.profitLabel, { color: theme.textSecondary }]}>Gross Profit</Text>
                   <Text style={[styles.profitVal, { color: invoiceTotals.grossProfit >= 0 ? theme.success : theme.danger, fontWeight: '800' }]}>
-                    PKR {invoiceTotals.grossProfit.toFixed(0)}
+                    PKR {invoiceTotals.grossProfit.toLocaleString('en-PK')}
                     {invoiceTotals.profitMargin !== null ? ` (${invoiceTotals.profitMargin.toFixed(1)}%)` : ''}
                   </Text>
                 </View>
 
                 {/* Per-item profit breakdown */}
-                {invoiceItems.map((item) => {
-                  const dbProduct = products.find(p => p.id === item.productId);
-                  const pp = dbProduct?.purchasePrice ?? 0;
+                {invoiceItems.map((item, idx) => {
+                  let pp = (typeof item.purchasePrice === 'number' && item.purchasePrice > 0)
+                    ? item.purchasePrice
+                    : 0;
+
+                  if (pp <= 0) {
+                    const dbProduct = products.find(p => 
+                      (p.id && item.productId && String(p.id).trim() === String(item.productId).trim()) ||
+                      (p.name && item.productName && p.name.trim().toLowerCase() === item.productName.trim().toLowerCase())
+                    );
+                    pp = getProductPurchasePrice(dbProduct);
+                  }
+
                   if (pp <= 0) return null;
                   const itemProfit = (item.price - pp) * item.quantity;
                   return (
-                    <View key={item.productId} style={styles.profitItemRow}>
-                      <Text style={[styles.profitItemName, { color: theme.textSecondary }]} numberOfLines={1}>
-                        {item.productName} ×{item.quantity}
-                      </Text>
+                    <View key={`${item.productId}_${idx}`} style={styles.profitItemRow}>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={[styles.profitItemName, { color: theme.textSecondary }]} numberOfLines={1}>
+                          {item.productName} ×{item.quantity}
+                        </Text>
+                        <Text style={{ fontSize: 10, color: theme.textSecondary }}>
+                          Purchase: PKR {pp.toLocaleString('en-PK')} / unit
+                        </Text>
+                      </View>
                       <Text style={[styles.profitItemVal, { color: itemProfit >= 0 ? theme.success : theme.danger }]}>
-                        {itemProfit >= 0 ? '+' : ''}PKR {itemProfit.toFixed(0)}
+                        {itemProfit >= 0 ? '+' : ''}PKR {itemProfit.toLocaleString('en-PK')}
                       </Text>
                     </View>
                   );
@@ -3101,12 +3165,27 @@ export default function BillsScreen() {
               // Quantity & Price configuration screen
               <View style={styles.pickerConfig}>
                 <View style={[styles.selectedProductCard, { backgroundColor: theme.background, borderColor: theme.border }]}>
-                  <Text style={[styles.selectedProdName, { color: theme.text }]}>
-                    {selectedProduct.name}
-                  </Text>
-                  <Text style={[styles.selectedProdStock, { color: selectedProduct.quantity <= selectedProduct.lowStockThreshold ? theme.danger : theme.textSecondary }]}>
-                    Stock: {selectedProduct.quantity} units available
-                  </Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.selectedProdName, { color: theme.text }]}>
+                        {selectedProduct.name}
+                      </Text>
+                      <Text style={[styles.selectedProdStock, { color: selectedProduct.quantity <= selectedProduct.lowStockThreshold ? theme.danger : theme.textSecondary }]}>
+                        Stock: {selectedProduct.quantity} units available
+                      </Text>
+                    </View>
+                    {canViewProfit && (() => {
+                      const selPp = getProductPurchasePrice(selectedProduct);
+                      return selPp > 0 ? (
+                        <View style={{ alignItems: 'flex-end', backgroundColor: theme.primary + '15', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '800', color: theme.primary }}>PURCHASE PRICE</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '900', color: theme.primary, marginTop: 1 }}>
+                            PKR {selPp.toLocaleString('en-PK')}
+                          </Text>
+                        </View>
+                      ) : null;
+                    })()}
+                  </View>
                 </View>
 
                 <View style={styles.rowInputs}>
@@ -3157,23 +3236,41 @@ export default function BillsScreen() {
                     </Text>
                   </View>
                 }
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={[styles.pickerProductItem, { borderBottomColor: theme.border }]}
-                    onPress={() => handleSelectProduct(item)}
-                    activeOpacity={0.7}
-                  >
-                    <View>
-                      <Text style={[styles.pickerProdName, { color: theme.text }]}>{item.name}</Text>
-                      <Text style={[styles.pickerProdStock, { color: item.quantity <= item.lowStockThreshold ? theme.danger : theme.textSecondary }]}>
-                        Stock: {item.quantity} left
-                      </Text>
-                    </View>
-                    <Text style={[styles.pickerProdPrice, { color: theme.primary }]}>
-                      PKR {item.price.toFixed(2)}
-                    </Text>
-                  </TouchableOpacity>
-                )}
+                renderItem={({ item }) => {
+                  const itemPp = getProductPurchasePrice(item);
+                  const itemProfit = item.price - itemPp;
+                  return (
+                    <TouchableOpacity
+                      style={[styles.pickerProductItem, { borderBottomColor: theme.border }]}
+                      onPress={() => handleSelectProduct(item)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.pickerProdName, { color: theme.text }]}>{item.name}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
+                          <Text style={[styles.pickerProdStock, { color: item.quantity <= item.lowStockThreshold ? theme.danger : theme.textSecondary }]}>
+                            Stock: {item.quantity} left
+                          </Text>
+                          {canViewProfit && itemPp > 0 && (
+                            <Text style={{ fontSize: 11, color: theme.textSecondary, fontWeight: '600' }}>
+                              Purchase: PKR {itemPp.toLocaleString('en-PK')}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={[styles.pickerProdPrice, { color: theme.primary }]}>
+                          PKR {item.price.toLocaleString('en-PK')}
+                        </Text>
+                        {canViewProfit && itemPp > 0 && (
+                          <Text style={{ fontSize: 10.5, fontWeight: '700', color: itemProfit >= 0 ? theme.success : theme.danger }}>
+                            {itemProfit >= 0 ? `+PKR ${itemProfit.toLocaleString('en-PK')} profit` : `Loss PKR ${Math.abs(itemProfit).toLocaleString('en-PK')}`}
+                          </Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                }}
               />
             )}
           </Card>
