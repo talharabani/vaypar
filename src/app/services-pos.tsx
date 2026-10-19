@@ -22,7 +22,6 @@ import { useAuth } from '../context/AuthContext';
 import { useDatabase } from '../context/DatabaseContext';
 import { useTheme } from '../hooks/use-theme';
 import * as sqlite from '../services/sqlite';
-import { printThermalSlip } from '../services/thermalPrinter';
 
 interface CustomServiceItem {
   id: string;
@@ -301,13 +300,6 @@ export default function PersonalizedServicesScreen() {
       setCreatedInvoice(newInv);
       setCreatedItems(savedItems);
       setReceiptVisible(true);
-
-      // Direct Thermal Slip Trigger
-      try {
-        await printThermalSlip(user || {}, newInv, savedItems, '80mm');
-      } catch (err) {
-        console.warn('Auto print warning:', err);
-      }
 
       // Reset form
       setCustomerName('');
@@ -695,12 +687,12 @@ export default function PersonalizedServicesScreen() {
             </View>
 
             <Button
-              title="Generate & Print Service Slip"
+              title="Generate Service Slip"
               variant="primary"
               size="large"
               loading={isSubmitting}
               onPress={handleCompleteService}
-              icon={<Ionicons name="print-outline" size={18} color="#fff" />}
+              icon={<Ionicons name="receipt-outline" size={18} color="#fff" />}
               style={{ marginTop: 16 }}
             />
           </Card>
