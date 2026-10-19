@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS products (
   created_by TEXT DEFAULT '',
   name TEXT NOT NULL,
   price NUMERIC DEFAULT 0,
+  purchase_price NUMERIC DEFAULT 0,
   quantity INTEGER DEFAULT 0,
   category TEXT DEFAULT '',
   low_stock_threshold INTEGER DEFAULT 5,
@@ -57,6 +58,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   customer_phone TEXT DEFAULT '',
   subtotal NUMERIC DEFAULT 0,
   discount NUMERIC DEFAULT 0,
+  service_charges NUMERIC DEFAULT 0,
   total NUMERIC DEFAULT 0,
   last_updated TIMESTAMPTZ DEFAULT NOW(),
   deleted BOOLEAN DEFAULT FALSE,
@@ -155,7 +157,7 @@ CREATE TABLE IF NOT EXISTS installment_payments (
 
 CREATE TABLE IF NOT EXISTS salary_payments (
   id TEXT PRIMARY KEY,
-  user_id TEXT REFERENCES profiles(id) ON DELETE CASCADE,
+  user_id TEXT DEFAULT '',
   business_id TEXT REFERENCES businesses(id) ON DELETE CASCADE,
   month TEXT DEFAULT '',
   amount NUMERIC DEFAULT 0,
@@ -402,7 +404,7 @@ ALTER TABLE salon_appointments ENABLE ROW LEVEL SECURITY;
 
 CREATE OR REPLACE FUNCTION auth_business_id()
 RETURNS TEXT AS $$
-  SELECT business_id FROM profiles WHERE id = auth.uid()::TEXT LIMIT 1;
+  SELECT business_id FROM profiles WHERE id::TEXT = auth.uid()::TEXT LIMIT 1;
 $$ LANGUAGE SQL SECURITY DEFINER STABLE;
 
 -- Macro for creating business-scoped RLS policies
@@ -434,18 +436,18 @@ END $$;
 -- Profiles: user can read all profiles in their business, write only own
 DROP POLICY IF EXISTS "profiles_read_business" ON profiles;
 CREATE POLICY "profiles_read_business" ON profiles
-  FOR SELECT USING (business_id = auth_business_id() OR id = auth.uid()::TEXT);
+  FOR SELECT USING (business_id = auth_business_id() OR id::TEXT = auth.uid()::TEXT);
 
 DROP POLICY IF EXISTS "profiles_insert_own" ON profiles;
 CREATE POLICY "profiles_insert_own" ON profiles
   FOR INSERT TO authenticated
-  WITH CHECK (id = auth.uid()::TEXT);
+  WITH CHECK (id::TEXT = auth.uid()::TEXT);
 
 DROP POLICY IF EXISTS "profiles_update_own" ON profiles;
 CREATE POLICY "profiles_update_own" ON profiles
   FOR UPDATE TO authenticated
-  USING (id = auth.uid()::TEXT OR business_id = auth_business_id())
-  WITH CHECK (id = auth.uid()::TEXT OR business_id = auth_business_id());
+  USING (id::TEXT = auth.uid()::TEXT OR business_id = auth_business_id())
+  WITH CHECK (id::TEXT = auth.uid()::TEXT OR business_id = auth_business_id());
 
 -- Businesses: authenticated users can register a business, members can read their business, owner can update
 DROP POLICY IF EXISTS "businesses_insert_authenticated" ON businesses;
@@ -455,13 +457,13 @@ CREATE POLICY "businesses_insert_authenticated" ON businesses
 
 DROP POLICY IF EXISTS "businesses_read" ON businesses;
 CREATE POLICY "businesses_read" ON businesses
-  FOR SELECT USING (id = auth_business_id() OR id IN (SELECT business_id FROM profiles WHERE id = auth.uid()::TEXT));
+  FOR SELECT USING (id = auth_business_id() OR id IN (SELECT business_id FROM profiles WHERE id::TEXT = auth.uid()::TEXT));
 
 DROP POLICY IF EXISTS "businesses_update" ON businesses;
 CREATE POLICY "businesses_update" ON businesses
   FOR UPDATE TO authenticated
-  USING (id = auth_business_id() OR id IN (SELECT business_id FROM profiles WHERE id = auth.uid()::TEXT AND role = 'owner'))
-  WITH CHECK (id = auth_business_id() OR id IN (SELECT business_id FROM profiles WHERE id = auth.uid()::TEXT AND role = 'owner'));
+  USING (id = auth_business_id() OR id IN (SELECT business_id FROM profiles WHERE id::TEXT = auth.uid()::TEXT AND role = 'owner'))
+  WITH CHECK (id = auth_business_id() OR id IN (SELECT business_id FROM profiles WHERE id::TEXT = auth.uid()::TEXT AND role = 'owner'));
 
 -- Invoice items: access through parent invoice
 DROP POLICY IF EXISTS "invoice_items_policy" ON invoice_items;

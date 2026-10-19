@@ -372,45 +372,51 @@ export function ReceiptModal({ visible, invoice, items, onClose, onExchangeRetur
                     </View>
                   </View>
 
-                  {/* Print Action Buttons */}
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-                    <Button
-                      title={paperWidth === '80mm' ? 'Print Standard Slip (80mm)' : 'Print Compact Slip (58mm)'}
-                      variant="primary"
-                      size="medium"
-                      loading={isDirectPrinting}
-                      onPress={handlePrintThermalSlip}
-                      style={{ flex: 1.4 }}
-                      icon={<Ionicons name="print" size={16} color="#FFFFFF" />}
-                    />
-                    <Button
-                      title="Pair BLE"
-                      variant="outline"
-                      size="medium"
-                      loading={isPrinting}
-                      onPress={handleBluetoothPrint}
-                      style={{ flex: 0.9 }}
-                      icon={<Ionicons name="bluetooth" size={16} color={theme.primary} />}
-                    />
-                  </View>
-
-                  {Platform.OS === 'web' && (
-                    <View style={{ marginTop: 8 }}>
+                  {/* 4 Action Buttons: Print Slip, Pair, WhatsApp, Export */}
+                  <View style={{ gap: 8, marginTop: 12 }}>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
                       <Button
-                        title="Preview & Print Thermal Slip"
-                        variant="secondary"
+                        title="Print Slip"
+                        variant="primary"
                         size="medium"
-                        onPress={() => {
-                          const html = generateThermalSlipHTML(user, invoice, items, paperWidth);
-                          openThermalPrintWindow(html);
-                        }}
-                        icon={<Ionicons name="open-outline" size={16} color={theme.text} />}
+                        loading={isDirectPrinting}
+                        onPress={handlePrintThermalSlip}
+                        style={{ flex: 1.2 }}
+                        icon={<Ionicons name="print" size={16} color="#FFFFFF" />}
+                      />
+                      <Button
+                        title="Pair"
+                        variant="outline"
+                        size="medium"
+                        loading={isPrinting}
+                        onPress={handleBluetoothPrint}
+                        style={{ flex: 0.8 }}
+                        icon={<Ionicons name="bluetooth" size={16} color={theme.primary} />}
                       />
                     </View>
-                  )}
+
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <Button
+                        title="WhatsApp"
+                        variant="secondary"
+                        size="medium"
+                        icon={<Ionicons name="logo-whatsapp" size={18} color="#25D366" />}
+                        onPress={() => handleWhatsAppRedirection(undefined, Platform.OS === 'web' ? 'web' : 'app')}
+                        style={{ flex: 1.2, borderColor: '#25D36660', backgroundColor: '#25D36615' }}
+                      />
+                      <Button
+                        title="Export"
+                        variant="outline"
+                        size="medium"
+                        icon={<Ionicons name="share-outline" size={16} color={theme.primary} />}
+                        onPress={handleSharePDF}
+                        style={{ flex: 0.8 }}
+                      />
+                    </View>
+                  </View>
 
                   {printSuccess && (
-                    <View style={[styles.successBanner, { backgroundColor: theme.success + '15', borderColor: theme.success }]}>
+                    <View style={[styles.successBanner, { backgroundColor: theme.success + '15', borderColor: theme.success, marginTop: 10 }]}>
                       <Ionicons name="checkmark-circle-outline" size={16} color={theme.success} style={{ marginRight: 6 }} />
                       <Text style={{ fontSize: 12, fontWeight: '700', color: theme.success }}>
                         {successMessage}
@@ -418,110 +424,6 @@ export function ReceiptModal({ visible, invoice, items, onClose, onExchangeRetur
                     </View>
                   )}
                 </Card>
-
-                {/* Digital Sharing Card */}
-                <Text style={[styles.controlLabel, { color: theme.textSecondary, marginTop: 16, marginBottom: 8, paddingLeft: 4 }]}>
-                  Digital Invoice Distribution
-                </Text>
-                
-                {copyFeedback && (
-                  <View style={[styles.successBanner, { backgroundColor: '#25D36620', borderColor: '#25D366', marginBottom: 10 }]}>
-                    <Ionicons name="checkmark-done-circle" size={16} color="#25D366" style={{ marginRight: 6 }} />
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#25D366' }}>
-                      Invoice message & link copied to clipboard!
-                    </Text>
-                  </View>
-                )}
-
-                {Platform.OS === 'web' ? (
-                  <View style={{ gap: 8 }}>
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                      <Button
-                        title={invoice.customerPhone ? `WhatsApp Web (${invoice.customerPhone})` : 'WhatsApp Web (Direct Chat)'}
-                        variant="secondary"
-                        size="medium"
-                        icon={<Ionicons name="globe-outline" size={18} color="#25D366" />}
-                        onPress={() => handleWhatsAppRedirection(undefined, 'web')}
-                        style={{ flex: 1.3, borderColor: '#25D36660', backgroundColor: '#25D36615' }}
-                      />
-                      
-                      <Button
-                        title="WhatsApp App"
-                        variant="outline"
-                        size="medium"
-                        icon={<Ionicons name="logo-whatsapp" size={18} color="#25D366" />}
-                        onPress={() => handleWhatsAppRedirection(undefined, 'app')}
-                        style={{ flex: 0.9, borderColor: '#25D36650' }}
-                      />
-                    </View>
-
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                      <Button
-                        title="Copy Message & Link"
-                        variant="outline"
-                        size="small"
-                        icon={<Ionicons name="copy-outline" size={16} color={theme.text} />}
-                        onPress={handleCopyMessage}
-                        style={{ flex: 1.1 }}
-                      />
-
-                      <Button
-                        title="Export PDF"
-                        variant="outline"
-                        size="small"
-                        icon={<Ionicons name="share-outline" size={16} color={theme.primary} />}
-                        onPress={handleSharePDF}
-                        style={{ flex: 0.9 }}
-                      />
-                    </View>
-                  </View>
-                ) : (
-                  <View style={styles.shareRow}>
-                    <Button
-                      title={invoice.customerPhone ? `WhatsApp (${invoice.customerPhone})` : 'WhatsApp Customer'}
-                      variant="secondary"
-                      size="medium"
-                      icon={<Ionicons name="logo-whatsapp" size={18} color="#25D366" />}
-                      onPress={() => handleWhatsAppRedirection(undefined, 'app')}
-                      style={{ flex: 1.2, borderColor: '#25D36650' }}
-                    />
-                    
-                    <Button
-                      title="Export PDF"
-                      variant="outline"
-                      size="medium"
-                      icon={<Ionicons name="share-outline" size={18} color={theme.primary} />}
-                      onPress={handleSharePDF}
-                      style={{ flex: 0.9 }}
-                    />
-                  </View>
-                )}
-
-                {/* Credit Button */}
-                <Button
-                  title={addingToUdhar ? 'Adding to Credit...' : 'Charge to Customer Credit'}
-                  variant="danger"
-                  size="medium"
-                  loading={addingToUdhar}
-                  icon={<Ionicons name="card-outline" size={18} color="#FFF" />}
-                  onPress={handleAddToUdhar}
-                  style={{ marginTop: 10 }}
-                />
-
-                {/* Exchange / Return Button */}
-                {onExchangeReturn && (
-                  <Button
-                    title="Exchange / Return Items"
-                    variant="outline"
-                    size="medium"
-                    icon={<Ionicons name="repeat-outline" size={18} color={theme.primary} />}
-                    onPress={() => {
-                      onClose();
-                      onExchangeReturn(invoice, items);
-                    }}
-                    style={{ marginTop: 10, borderColor: theme.primary }}
-                  />
-                )}
               </View>
 
             </View>

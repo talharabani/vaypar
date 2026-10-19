@@ -14,12 +14,14 @@ export default function PublicInvoiceScreen() {
     c?: string;
     p?: string;
     data?: string;
+    d?: string;
   }>();
 
   const invoiceData = useMemo(() => {
-    // 1. Try decoding full payload if provided
-    if (params.data) {
-      const decoded = decodeInvoicePayload(params.data);
+    // 1. Try decoding compressed or legacy payload if provided
+    const payload = params.d || params.data;
+    if (payload) {
+      const decoded = decodeInvoicePayload(payload);
       if (decoded) return decoded;
     }
 

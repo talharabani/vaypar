@@ -191,18 +191,36 @@ export function useRealtimeSync(businessId: string | undefined) {
           if (payload.new) {
             const product = payload.new as Record<string, unknown>;
             try {
+              const existing = await sqlite.getProductById(product.id as string);
+              const rawPp = product.purchase_price ?? product.purchasePrice;
+              const pp = (rawPp !== null && rawPp !== undefined && Number(rawPp) > 0)
+                ? Number(rawPp)
+                : (existing?.purchasePrice ?? 0);
+
               await sqlite.upsertProduct({
                 id: product.id as string,
                 userId: '', // legacy
-                businessId: product.business_id as string,
-                createdBy: product.created_by as string || '',
-                name: product.name as string,
-                price: Number(product.price || 0),
-                quantity: Number(product.quantity || 0),
-                category: (product.category as string) || '',
-                lowStockThreshold: Number(product.low_stock_threshold ?? 5),
+                businessId: (product.business_id as string) || businessId,
+                createdBy: (product.created_by as string) || '',
+                name: (product.name as string) || existing?.name || '',
+                price: product.price !== undefined ? Number(product.price) : (existing?.price ?? 0),
+                purchasePrice: pp,
+                quantity: product.quantity !== undefined ? Number(product.quantity) : (existing?.quantity ?? 0),
+                category: (product.category as string) || existing?.category || '',
+                lowStockThreshold: product.low_stock_threshold !== undefined ? Number(product.low_stock_threshold) : (existing?.lowStockThreshold ?? 5),
+                boxLocation: (product.box_location as string) || (product.boxLocation as string) || existing?.boxLocation || null,
+                listOnStore: (product.list_on_store !== undefined ? Number(product.list_on_store) : (product.listOnStore !== undefined ? Number(product.listOnStore) : existing?.listOnStore)) ?? 0,
+                sku: (product.sku as string) || existing?.sku || null,
+                barcode: (product.barcode as string) || existing?.barcode || null,
+                unit: (product.unit as string) || existing?.unit || null,
+                brand: (product.brand as string) || existing?.brand || null,
+                supplier: (product.supplier as string) || existing?.supplier || null,
+                tax: (product.tax !== undefined ? Number(product.tax) : existing?.tax) ?? 0,
+                description: (product.description as string) || existing?.description || null,
+                imageUrl: (product.image_url as string) || (product.image_uri as string) || existing?.imageUrl || null,
+                status: (product.status as string) || existing?.status || 'active',
                 synced: 1,
-                lastUpdated: product.last_updated as string,
+                lastUpdated: (product.last_updated as string) || new Date().toISOString(),
                 deleted: product.deleted ? 1 : 0,
               });
             } catch (err) {

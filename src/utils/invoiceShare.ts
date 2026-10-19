@@ -3,8 +3,10 @@ import { Invoice, InvoiceItem } from '../services/sqlite';
 import { UserSession } from '../store/useAuthStore';
 import { generateInvoiceHTML } from '../services/pdfGenerator';
 
+import { compressToUrlSafe, decompressFromUrlSafe } from './lzCompress';
+
 /**
- * Encodes invoice data payload safely for URL query transport
+ * Encodes invoice data payload safely for URL query transport using ultra-compact format + compression
  */
 export function encodeInvoicePayload(
   business: Partial<UserSession>,
@@ -12,37 +14,36 @@ export function encodeInvoicePayload(
   items: InvoiceItem[]
 ): string {
   try {
-    const payload = {
-      b: {
-        n: business.businessName || 'Business',
-        p: business.phone || '',
-        a: business.address || '',
-        e: business.email || '',
-        l: business.logoUri || ''
-      },
-      inv: {
-        id: invoice.id,
-        t: invoice.total,
-        st: invoice.subtotal,
-        d: invoice.discount || 0,
-        dt: invoice.createdAt,
-        cn: invoice.customerName || '',
-        cp: invoice.customerPhone || ''
-      },
-      items: items.map(it => ({
-        n: it.productName,
-        q: it.quantity,
-        p: it.price,
-        t: it.total
-      }))
+    // Strip heavy base64 data URIs from logo so it doesn't bloat the URL
+    const logo = business.logoUri && !business.logoUri.startsWith('data:') ? business.logoUri : '';
+
+    const compactPayload = {
+      b: [
+        business.businessName || 'Business',
+        business.phone || '',
+        business.address || '',
+        business.email || '',
+        logo
+      ],
+      i: [
+        invoice.id,
+        invoice.total,
+        invoice.createdAt,
+        invoice.customerName || '',
+        invoice.customerPhone || '',
+        invoice.subtotal || invoice.total,
+        invoice.discount || 0
+      ],
+      it: items.map(it => [
+        it.productName,
+        it.quantity,
+        it.price,
+        it.total
+      ])
     };
 
-    const jsonStr = JSON.stringify(payload);
-    if (typeof btoa !== 'undefined') {
-      return btoa(unescape(encodeURIComponent(jsonStr)));
-    }
-    // Fallback for environments without btoa
-    return Buffer.from(jsonStr, 'utf-8').toString('base64');
+    const jsonStr = JSON.stringify(compactPayload);
+    return compressToUrlSafe(jsonStr);
   } catch (err) {
     console.warn('Failed to encode invoice payload:', err);
     return '';
@@ -50,7 +51,7 @@ export function encodeInvoicePayload(
 }
 
 /**
- * Decodes invoice data payload from URL query transport
+ * Decodes invoice data payload from URL query transport (supports both compressed and legacy format)
  */
 export function decodeInvoicePayload(encoded: string): {
   business: Partial<UserSession>;
@@ -59,13 +60,68 @@ export function decodeInvoicePayload(encoded: string): {
 } | null {
   try {
     let jsonStr = '';
-    if (typeof atob !== 'undefined') {
-      jsonStr = decodeURIComponent(escape(atob(encoded)));
+    // 1. Try LZ decompression
+    const decompressed = decompressFromUrlSafe(encoded);
+    if (decompressed && decompressed.startsWith('{')) {
+      jsonStr = decompressed;
     } else {
-      jsonStr = Buffer.from(encoded, 'base64').toString('utf-8');
+      // 2. Fallback to base64 for legacy links
+      if (typeof atob !== 'undefined') {
+        try {
+          jsonStr = decodeURIComponent(escape(atob(encoded)));
+        } catch {}
+      }
+      if (!jsonStr && typeof Buffer !== 'undefined') {
+        try {
+          jsonStr = Buffer.from(encoded, 'base64').toString('utf-8');
+        } catch {}
+      }
     }
+
+    if (!jsonStr) return null;
     const data = JSON.parse(jsonStr);
 
+    // If new compact schema:
+    if (Array.isArray(data.b) && Array.isArray(data.i)) {
+      const [bName, bPhone, bAddress, bEmail, bLogo] = data.b;
+      const [invId, invTotal, invDate, custName, custPhone, invSubtotal, invDiscount] = data.i;
+      const rawItems = Array.isArray(data.it) ? data.it : [];
+
+      return {
+        business: {
+          businessName: bName || 'Business',
+          phone: bPhone || '',
+          address: bAddress || '',
+          email: bEmail || '',
+          logoUri: bLogo || ''
+        },
+        invoice: {
+          id: invId || 'INV_0000',
+          userId: 'public',
+          businessId: 'public',
+          createdBy: 'public',
+          total: Number(invTotal) || 0,
+          subtotal: Number(invSubtotal) || Number(invTotal) || 0,
+          discount: Number(invDiscount) || 0,
+          createdAt: invDate || new Date().toISOString(),
+          customerName: custName || 'Customer',
+          customerPhone: custPhone || '',
+          synced: 0,
+          lastUpdated: invDate || new Date().toISOString(),
+        },
+        items: rawItems.map((it: any) => ({
+          id: 'item_' + Math.random().toString(36).substring(2, 7),
+          invoiceId: invId || '',
+          productId: '',
+          productName: it[0] || 'Item',
+          quantity: Number(it[1]) || 1,
+          price: Number(it[2]) || 0,
+          total: Number(it[3]) || 0,
+        })) as InvoiceItem[]
+      };
+    }
+
+    // Legacy schema fallback
     return {
       business: {
         businessName: data.b?.n || 'Business',
@@ -105,7 +161,7 @@ export function decodeInvoicePayload(encoded: string): {
 }
 
 /**
- * Generates the public invoice link with business name, total, date & full payload
+ * Generates the clean, compressed public invoice link
  */
 export function getInvoicePublicUrl(
   business: Partial<UserSession>,
@@ -117,24 +173,14 @@ export function getInvoicePublicUrl(
     origin = window.location.origin;
   }
 
-  const formattedDate = new Date(invoice.createdAt).toLocaleDateString('en-PK', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric'
-  });
-
   const cleanId = invoice.id.replace(/^inv_/i, '').toUpperCase();
-  const encodedData = encodeInvoicePayload(business, invoice, items);
+  const compressedData = encodeInvoicePayload(business, invoice, items);
 
-  const params = new URLSearchParams();
-  params.set('biz', business.businessName || 'Business');
-  params.set('total', Math.round(invoice.total).toString());
-  params.set('date', formattedDate);
-  if (invoice.customerName) params.set('c', invoice.customerName);
-  if (invoice.customerPhone) params.set('p', invoice.customerPhone);
-  if (encodedData) params.set('data', encodedData);
+  if (compressedData) {
+    return `${origin}/invoice/${cleanId}?d=${compressedData}`;
+  }
 
-  return `${origin}/invoice/${cleanId}?${params.toString()}`;
+  return `${origin}/invoice/${cleanId}`;
 }
 
 /**

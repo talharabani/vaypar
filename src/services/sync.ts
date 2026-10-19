@@ -130,13 +130,14 @@ async function pushLocalChanges(userId: string, businessId: string, profile: sql
       quantity: p.quantity,
       category: p.category,
       low_stock_threshold: p.lowStockThreshold,
+      box_location: p.boxLocation || null,
       last_updated: p.lastUpdated,
       deleted: (p.deleted ?? 0) === 1,
     }));
 
     let { error } = await supabase.from('products').upsert(rows);
-    if (error && (error.message?.includes('purchase_price') || (error as any).code === '42703')) {
-      const fallbackRows = rows.map(({ purchase_price, ...rest }) => rest);
+    if (error && ((error as any).code === '42703' || error.message?.includes('box_location') || error.message?.includes('purchase_price'))) {
+      const fallbackRows = rows.map(({ box_location, ...rest }) => rest);
       const res = await supabase.from('products').upsert(fallbackRows);
       error = res.error;
     }
@@ -333,8 +334,9 @@ async function pullRemoteChanges(userId: string, businessId: string) {
     console.log(`[Sync] Pulled ${remoteProducts.length} remote products`);
     for (const rp of remoteProducts) {
       const existing = await sqlite.getProductById(rp.id);
-      const pp = (rp.purchase_price !== null && rp.purchase_price !== undefined && Number(rp.purchase_price) > 0)
-        ? Number(rp.purchase_price)
+      const rawPp = rp.purchase_price ?? rp.purchasePrice;
+      const pp = (rawPp !== null && rawPp !== undefined && Number(rawPp) > 0)
+        ? Number(rawPp)
         : (existing?.purchasePrice ?? 0);
 
       await sqlite.upsertProduct({
@@ -348,6 +350,17 @@ async function pullRemoteChanges(userId: string, businessId: string) {
         quantity: rp.quantity,
         category: rp.category,
         lowStockThreshold: rp.low_stock_threshold ?? 5,
+        boxLocation: rp.box_location || rp.boxLocation || existing?.boxLocation || null,
+        listOnStore: (rp.list_on_store !== undefined ? Number(rp.list_on_store) : (rp.listOnStore !== undefined ? Number(rp.listOnStore) : existing?.listOnStore)) ?? 0,
+        sku: rp.sku || existing?.sku || null,
+        barcode: rp.barcode || existing?.barcode || null,
+        unit: rp.unit || existing?.unit || null,
+        brand: rp.brand || existing?.brand || null,
+        supplier: rp.supplier || existing?.supplier || null,
+        tax: (rp.tax !== undefined ? Number(rp.tax) : existing?.tax) ?? 0,
+        description: rp.description || existing?.description || null,
+        imageUrl: rp.image_url || rp.image_uri || existing?.imageUrl || null,
+        status: rp.status || existing?.status || 'active',
         synced: 1,
         lastUpdated: rp.last_updated,
         deleted: rp.deleted ? 1 : 0,

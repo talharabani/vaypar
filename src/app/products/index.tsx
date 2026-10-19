@@ -237,14 +237,22 @@ export default function ProductsScreen() {
                   </View>
 
                   <View style={styles.metaRow}>
-                    <Ionicons name="pricetag-outline" size={12} color={theme.textSecondary} />
-                    <Text style={[styles.metaText, { color: theme.textSecondary }]}>{item.category || 'General'}</Text>
-                    {item.boxLocation ? (
-                      <>
-                        <Ionicons name="cube-outline" size={12} color={theme.textSecondary} style={{ marginLeft: 8 }} />
-                        <Text style={[styles.metaText, { color: theme.textSecondary }]}>{item.boxLocation}</Text>
-                      </>
-                    ) : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Ionicons name="pricetag-outline" size={12} color={theme.textSecondary} />
+                      <Text style={[styles.metaText, { color: theme.textSecondary }]}>{item.category || 'General'}</Text>
+                    </View>
+                    {item.boxLocation ? (() => {
+                      const lower = item.boxLocation.toLowerCase();
+                      const boxLabel = (lower.includes('box') || lower.includes('shelf') || lower.includes('rack'))
+                        ? item.boxLocation
+                        : `Box: ${item.boxLocation}`;
+                      return (
+                        <View style={[styles.boxBadge, { backgroundColor: theme.primary + '14', borderColor: theme.primary + '35' }]}>
+                          <Ionicons name="cube" size={11} color={theme.primary} />
+                          <Text style={[styles.boxBadgeText, { color: theme.primary }]}>{boxLabel}</Text>
+                        </View>
+                      );
+                    })() : null}
                   </View>
 
                   <View style={styles.priceRow}>
@@ -588,8 +596,10 @@ const styles = StyleSheet.create({
   badgeRow: { flexDirection: 'row', gap: 4 },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: 0.5 },
   badgeText: { fontSize: 9, fontWeight: '800' },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8, flexWrap: 'wrap' },
   metaText: { fontSize: 11, fontWeight: '600' },
+  boxBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1, marginLeft: 6 },
+  boxBadgeText: { fontSize: 11, fontWeight: '700' },
   priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   priceBlock: { alignItems: 'flex-start' },
   priceLabel: { fontSize: 9, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 1 },
