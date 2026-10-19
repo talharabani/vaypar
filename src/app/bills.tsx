@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react';
 import {
     Alert,
     FlatList,
+    Linking,
     Modal,
     Platform,
     ScrollView,
@@ -28,6 +29,7 @@ import { useRouter } from 'expo-router';
 import { shareSalesReportPDF } from '../services/pdfGenerator';
 import * as sqlite from '../services/sqlite';
 import { validateCustomerName, validateCustomerPhone, detectCountryCode } from '../utils/phoneUtils';
+import { formatCustomerPhoneForWhatsApp } from '../utils/invoiceShare';
 
 export default function BillsScreen() {
   const router = useRouter();
@@ -55,7 +57,7 @@ export default function BillsScreen() {
   const hasReportsAccess = isOwner || user?.role === 'manager';
 
   // Tab State — cashiers default to create, managers/owners to history
-  const [activeTab, setActiveTab] = useState<'history' | 'create' | 'installments'>(isCashier ? 'create' : 'history');
+  const [activeTab, setActiveTab] = useState<'history' | 'create' | 'customers' | 'installments'>(isCashier ? 'create' : 'history');
   const [billingPaymentType, setBillingPaymentType] = useState<'cash' | 'credit'>('cash');
 
   // Search History State
@@ -984,6 +986,30 @@ export default function BillsScreen() {
           </Text>
         </TouchableOpacity>
 
+        {/* Customer Directory: Full Screen Tab */}
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'customers' && { borderBottomColor: theme.primary }]}
+          onPress={() => setActiveTab('customers')}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[styles.tabText, { color: activeTab === 'customers' ? theme.primary : theme.textSecondary }]}>
+              Customer Directory
+            </Text>
+            {customerDirectory.length > 0 && (
+              <View style={{
+                backgroundColor: activeTab === 'customers' ? theme.primary + '20' : theme.border,
+                paddingHorizontal: 6,
+                paddingVertical: 1,
+                borderRadius: 10,
+              }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: activeTab === 'customers' ? theme.primary : theme.textSecondary }}>
+                  {customerDirectory.length}
+                </Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+
         {/* Installments: only owners and managers */}
         {hasReportsAccess && (
           <TouchableOpacity 
@@ -1113,7 +1139,7 @@ export default function BillsScreen() {
                 </Text>
               </View>
 
-              <View style={{ flexDirection: 'row', gap: 6 }}>
+              <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                 <TouchableOpacity
                   style={{
                     flexDirection: 'row',
@@ -1131,6 +1157,26 @@ export default function BillsScreen() {
                   <Ionicons name="people-outline" size={14} color={theme.primary} />
                   <Text style={{ fontSize: 11, fontWeight: '700', color: theme.primary }}>
                     Directory ({customerDirectory.length})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    backgroundColor: theme.backgroundElement,
+                    paddingHorizontal: 9,
+                    paddingVertical: 5,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                  }}
+                  onPress={() => setActiveTab('customers')}
+                >
+                  <Ionicons name="expand-outline" size={13} color={theme.textSecondary} />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>
+                    Full Screen Tab
                   </Text>
                 </TouchableOpacity>
 
@@ -1622,6 +1668,353 @@ export default function BillsScreen() {
               style={styles.saveInvoiceBtn}
             />
           </Card>
+        </ScrollView>
+      )}
+
+      {/* ==========================================
+          TAB: CUSTOMER DIRECTORY FULL SCREEN
+          ========================================== */}
+      {activeTab === 'customers' && (
+        <ScrollView style={styles.tabContent} contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
+          {/* Top Overview Cards */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+            <Card style={{ flex: 1, minWidth: 140, padding: 14, backgroundColor: theme.backgroundElement }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, textTransform: 'uppercase' }}>
+                Total Customers
+              </Text>
+              <Text style={{ fontSize: 24, fontWeight: '900', color: theme.text, marginTop: 4 }}>
+                {customerDirectory.length}
+              </Text>
+              <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>Registered profiles</Text>
+            </Card>
+
+            <Card style={{ flex: 1, minWidth: 140, padding: 14, backgroundColor: theme.backgroundElement }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, textTransform: 'uppercase' }}>
+                Repeat Buyers
+              </Text>
+              <Text style={{ fontSize: 24, fontWeight: '900', color: theme.primary, marginTop: 4 }}>
+                {customerDirectory.filter(c => c.totalVisits > 1).length}
+              </Text>
+              <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>
+                {customerDirectory.length > 0 ? `${Math.round((customerDirectory.filter(c => c.totalVisits > 1).length / customerDirectory.length) * 100)}% retention` : '0%'}
+              </Text>
+            </Card>
+
+            <Card style={{ flex: 1, minWidth: 140, padding: 14, backgroundColor: theme.backgroundElement }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, textTransform: 'uppercase' }}>
+                Lifetime Sales
+              </Text>
+              <Text style={{ fontSize: 22, fontWeight: '900', color: theme.success, marginTop: 4 }}>
+                PKR {customerDirectory.reduce((sum, c) => sum + (c.totalSpend || 0), 0).toLocaleString('en-PK')}
+              </Text>
+              <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>Client base revenue</Text>
+            </Card>
+
+            <Card style={{ flex: 1, minWidth: 140, padding: 14, backgroundColor: theme.backgroundElement }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, textTransform: 'uppercase' }}>
+                Avg Order Value
+              </Text>
+              <Text style={{ fontSize: 22, fontWeight: '900', color: theme.text, marginTop: 4 }}>
+                PKR {customerDirectory.length > 0 ? Math.round(customerDirectory.reduce((sum, c) => sum + (c.totalSpend || 0), 0) / Math.max(1, customerDirectory.reduce((sum, c) => sum + (c.totalVisits || 1), 0))).toLocaleString('en-PK') : '0'}
+              </Text>
+              <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>Per billed invoice</Text>
+            </Card>
+          </View>
+
+          {/* Search bar & Add Customer Control */}
+          <Card style={{ padding: 14, marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              <View style={[styles.searchInputRow, { backgroundColor: theme.background, borderColor: theme.border, flex: 1 }]}>
+                <Ionicons name="search" size={20} color={theme.textSecondary} />
+                <Input
+                  placeholder="Search customers by name, phone or address..."
+                  value={customerDirectorySearch}
+                  onChangeText={setCustomerDirectorySearch}
+                  style={styles.searchInput}
+                  containerStyle={styles.searchInputContainer}
+                />
+                {customerDirectorySearch ? (
+                  <TouchableOpacity onPress={() => setCustomerDirectorySearch('')}>
+                    <Ionicons name="close-circle" size={18} color={theme.textSecondary} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+
+              <TouchableOpacity
+                onPress={() => setShowAddCustomerModal(prev => !prev)}
+                style={{
+                  backgroundColor: theme.primary,
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexDirection: 'row',
+                  gap: 6
+                }}
+              >
+                <Ionicons name={showAddCustomerModal ? "close-outline" : "person-add-outline"} size={18} color="#fff" />
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
+                  {showAddCustomerModal ? "Close Form" : "+ Add Customer"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Inline Add Customer Form */}
+            {showAddCustomerModal && (
+              <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>Create Customer Profile</Text>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary }}>
+                    Profile will be saved permanently and available across billing, installment finance, and reports
+                  </Text>
+                </View>
+
+                <View style={{ flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Input
+                      label="Customer Name *"
+                      placeholder="e.g. Ahmed Raza / Shop 4"
+                      value={newCustName}
+                      onChangeText={setNewCustName}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Input
+                      label="Customer Mobile *"
+                      placeholder="e.g. 03001234567"
+                      value={newCustPhone}
+                      onChangeText={setNewCustPhone}
+                      keyboardType="phone-pad"
+                    />
+                  </View>
+                  <View style={{ flex: 1.2 }}>
+                    <Input
+                      label="Address / Area (Optional)"
+                      placeholder="e.g. Saddar, Karachi"
+                      value={newCustAddress}
+                      onChangeText={setNewCustAddress}
+                    />
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+                  <Button
+                    title="Cancel"
+                    variant="outline"
+                    size="medium"
+                    onPress={() => setShowAddCustomerModal(false)}
+                    style={{ minWidth: 100 }}
+                  />
+                  <Button
+                    title="Save Customer Profile"
+                    variant="primary"
+                    size="medium"
+                    loading={addingCustomer}
+                    onPress={async () => {
+                      if (!newCustName.trim()) {
+                        Alert.alert('Required', 'Please enter customer name');
+                        return;
+                      }
+                      setAddingCustomer(true);
+                      try {
+                        const added = await addCustomer(newCustName, newCustPhone, newCustAddress);
+                        setCustomerName(added.name);
+                        setCustomerPhone(added.phone);
+                        setShowAddCustomerModal(false);
+                        setNewCustName('');
+                        setNewCustPhone('');
+                        setNewCustAddress('');
+                        if (Platform.OS === 'web') window.alert('Customer profile created successfully!');
+                        else Alert.alert('Success', 'Customer profile created successfully!');
+                      } catch (e: any) {
+                        Alert.alert('Error', e.message || 'Failed to create customer');
+                      } finally {
+                        setAddingCustomer(false);
+                      }
+                    }}
+                    style={{ minWidth: 160 }}
+                  />
+                </View>
+              </View>
+            )}
+          </Card>
+
+          {/* Customer Directory List */}
+          <View style={{ gap: 10 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 4 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: theme.textSecondary }}>
+                {filteredCustomerDirectory.length} Profiles Found
+              </Text>
+              {customerDirectorySearch ? (
+                <TouchableOpacity onPress={() => setCustomerDirectorySearch('')}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>Clear Filter</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            {filteredCustomerDirectory.length === 0 ? (
+              <Card style={{ padding: 36, alignItems: 'center' }}>
+                <Ionicons name="people-outline" size={54} color={theme.textSecondary + '60'} />
+                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginTop: 12 }}>
+                  {customerDirectorySearch ? 'No customers found matching search' : 'No customers registered yet'}
+                </Text>
+                <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4, textAlign: 'center' }}>
+                  {customerDirectorySearch ? 'Try searching by a different name, phone, or area.' : 'Add your first customer profile or create a bill to remember customers automatically.'}
+                </Text>
+                {!showAddCustomerModal && (
+                  <Button
+                    title="+ Add New Customer"
+                    variant="primary"
+                    size="medium"
+                    onPress={() => setShowAddCustomerModal(true)}
+                    style={{ marginTop: 16 }}
+                  />
+                )}
+              </Card>
+            ) : (
+              filteredCustomerDirectory.map((cust, idx) => {
+                const initials = (cust.name || 'C')
+                  .split(' ')
+                  .map(p => p[0])
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase();
+
+                return (
+                  <Card key={cust.phone || `${cust.name}_${idx}`} style={{ padding: 14 }}>
+                    <View style={{ flexDirection: Platform.OS === 'web' ? 'row' : 'column', justifyContent: 'space-between', alignItems: Platform.OS === 'web' ? 'center' : 'flex-start', gap: 12 }}>
+                      {/* Left: Avatar + Details */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                        <View style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 22,
+                          backgroundColor: theme.primary + '18',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderWidth: 1.5,
+                          borderColor: theme.primary + '30',
+                        }}>
+                          <Text style={{ fontSize: 16, fontWeight: '900', color: theme.primary }}>
+                            {initials}
+                          </Text>
+                        </View>
+
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <Text style={{ fontSize: 15, fontWeight: '800', color: theme.text }}>
+                              {cust.name}
+                            </Text>
+                            {cust.totalVisits > 1 && (
+                              <View style={{ backgroundColor: theme.success + '20', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 8 }}>
+                                <Text style={{ fontSize: 10, fontWeight: '800', color: theme.success }}>REPEAT CLIENT</Text>
+                              </View>
+                            )}
+                          </View>
+
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
+                            {cust.phone ? (
+                              <Text style={{ fontSize: 13, color: theme.textSecondary }}>
+                                📞 {cust.phone}
+                              </Text>
+                            ) : null}
+
+                            {cust.lastVisit ? (
+                              <Text style={{ fontSize: 12, color: theme.textSecondary }}>
+                                🕒 Last Visit: {new Date(cust.lastVisit).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              </Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Right: Metrics + Action Buttons */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, width: Platform.OS === 'web' ? 'auto' : '100%', justifyContent: Platform.OS === 'web' ? 'flex-end' : 'space-between', borderTopWidth: Platform.OS === 'web' ? 0 : 1, borderTopColor: theme.border, paddingTop: Platform.OS === 'web' ? 0 : 10 }}>
+                        <View style={{ alignItems: 'flex-end', marginRight: Platform.OS === 'web' ? 6 : 0 }}>
+                          <Text style={{ fontSize: 14, fontWeight: '900', color: theme.primary }}>
+                            PKR {(cust.totalSpend || 0).toLocaleString('en-PK')}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: theme.textSecondary }}>
+                            {cust.totalVisits} {cust.totalVisits === 1 ? 'Invoice' : 'Invoices'}
+                          </Text>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          {cust.phone ? (
+                            <TouchableOpacity
+                              style={{
+                                paddingHorizontal: 10,
+                                paddingVertical: 7,
+                                borderRadius: 8,
+                                backgroundColor: '#25D366' + '20',
+                                borderWidth: 1,
+                                borderColor: '#25D366' + '40',
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                              onPress={() => {
+                                const cleanPhone = formatCustomerPhoneForWhatsApp(cust.phone);
+                                const url = `https://wa.me/${cleanPhone}`;
+                                if (Platform.OS === 'web') window.open(url, '_blank');
+                                else Linking.openURL(url);
+                              }}
+                            >
+                              <Ionicons name="logo-whatsapp" size={15} color="#16A34A" />
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#16A34A' }}>Chat</Text>
+                            </TouchableOpacity>
+                          ) : null}
+
+                          <TouchableOpacity
+                            style={{
+                              paddingHorizontal: 10,
+                              paddingVertical: 7,
+                              borderRadius: 8,
+                              backgroundColor: theme.background,
+                              borderWidth: 1,
+                              borderColor: theme.border,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            onPress={() => {
+                              setHistorySearch(cust.phone || cust.name);
+                              setActiveTab('history');
+                            }}
+                          >
+                            <Ionicons name="receipt-outline" size={14} color={theme.textSecondary} />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>History</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={{
+                              paddingHorizontal: 12,
+                              paddingVertical: 7,
+                              borderRadius: 8,
+                              backgroundColor: theme.primary,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            onPress={() => {
+                              setCustomerName(cust.name);
+                              setCustomerPhone(cust.phone || '');
+                              setActiveTab('create');
+                            }}
+                          >
+                            <Ionicons name="cart-outline" size={14} color="#FFFFFF" />
+                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#FFFFFF' }}>New Bill</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  </Card>
+                );
+              })
+            )}
+          </View>
         </ScrollView>
       )}
 
@@ -2445,7 +2838,12 @@ export default function BillsScreen() {
         onRequestClose={() => setCustomerDirectoryModalVisible(false)}
       >
         <View style={styles.pickerOverlay}>
-          <Card style={[styles.pickerContainer, { backgroundColor: theme.backgroundElement, maxHeight: '85%' }]}>
+          <Card style={[
+            styles.pickerContainer, 
+            { backgroundColor: theme.backgroundElement },
+            Platform.OS === 'web' && { maxHeight: '90%', width: '100%', maxWidth: 640 }
+          ]}>
+            {/* Modal Header */}
             <View style={styles.pickerHeader}>
               <View>
                 <Text style={[styles.pickerTitle, { color: theme.text }]}>Customer Directory</Text>
@@ -2453,175 +2851,218 @@ export default function BillsScreen() {
                   {filteredCustomerDirectory.length} Unique Customers Found
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => setCustomerDirectoryModalVisible(false)}>
-                <Ionicons name="close" size={24} color={theme.text} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Search Customers Bar + Add Customer */}
-            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-              <View style={[styles.pickerSearch, { backgroundColor: theme.background, borderColor: theme.border, flex: 1 }]}>
-                <Ionicons name="search" size={18} color={theme.textSecondary} />
-                <Input
-                  placeholder="Search by name or mobile number..."
-                  value={customerDirectorySearch}
-                  onChangeText={setCustomerDirectorySearch}
-                  style={styles.pickerSearchInput}
-                  containerStyle={styles.pickerSearchInputContainer}
-                />
-              </View>
-              <TouchableOpacity
-                onPress={() => setShowAddCustomerModal(true)}
-                style={{
-                  backgroundColor: theme.primary,
-                  paddingHorizontal: 12,
-                  borderRadius: 10,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexDirection: 'row',
-                  gap: 4
-                }}
-              >
-                <Ionicons name="person-add-outline" size={16} color="#fff" />
-                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>+ New</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Quick Add Customer Modal */}
-            {showAddCustomerModal && (
-              <Card style={{ marginBottom: 12, borderColor: theme.primary, borderWidth: 1.5, padding: 12 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text, marginBottom: 8 }}>
-                  Create Customer Profile
-                </Text>
-                <Input
-                  label="Customer Name *"
-                  placeholder="e.g. Ahmed Raza / Shop 4"
-                  value={newCustName}
-                  onChangeText={setNewCustName}
-                />
-                <Input
-                  label="Customer Mobile"
-                  placeholder="e.g. 03001234567"
-                  value={newCustPhone}
-                  onChangeText={setNewCustPhone}
-                  keyboardType="phone-pad"
-                />
-                <Input
-                  label="Address / Area (Optional)"
-                  placeholder="e.g. Saddar, Karachi"
-                  value={newCustAddress}
-                  onChangeText={setNewCustAddress}
-                />
-                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                  <Button
-                    title="Cancel"
-                    variant="outline"
-                    size="small"
-                    onPress={() => setShowAddCustomerModal(false)}
-                    style={{ flex: 1 }}
-                  />
-                  <Button
-                    title="Save Customer"
-                    variant="primary"
-                    size="small"
-                    onPress={async () => {
-                      if (!newCustName.trim()) {
-                        Alert.alert('Required', 'Please enter customer name');
-                        return;
-                      }
-                      setAddingCustomer(true);
-                      try {
-                        const added = await addCustomer(newCustName, newCustPhone, newCustAddress);
-                        setCustomerName(added.name);
-                        setCustomerPhone(added.phone);
-                        setShowAddCustomerModal(false);
-                        setCustomerDirectoryModalVisible(false);
-                        setNewCustName('');
-                        setNewCustPhone('');
-                        setNewCustAddress('');
-                        if (Platform.OS === 'web') window.alert('Customer profile created successfully!');
-                        else Alert.alert('Success', 'Customer profile created successfully!');
-                      } catch (e: any) {
-                        Alert.alert('Error', e.message || 'Failed to create customer');
-                      } finally {
-                        setAddingCustomer(false);
-                      }
-                    }}
-                    loading={addingCustomer}
-                    style={{ flex: 1.5 }}
-                  />
-                </View>
-              </Card>
-            )}
-
-            {/* Customer List */}
-            <FlatList
-              data={filteredCustomerDirectory}
-              keyExtractor={(item, index) => item.phone || String(index)}
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item }) => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <TouchableOpacity
-                  onPress={() => handleSelectCustomer(item)}
+                  onPress={() => {
+                    setCustomerDirectoryModalVisible(false);
+                    setActiveTab('customers');
+                  }}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    paddingVertical: 12,
-                    paddingHorizontal: 12,
-                    borderRadius: 12,
-                    backgroundColor: theme.backgroundElement,
+                    gap: 5,
+                    backgroundColor: theme.primary + '18',
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 10,
                     borderWidth: 1,
-                    borderColor: theme.border,
-                    marginBottom: 8,
+                    borderColor: theme.primary + '35',
                   }}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                    <View style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
-                      backgroundColor: theme.primary + '15',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}>
-                      <Ionicons name="person" size={16} color={theme.primary} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>
-                        {item.name}
-                      </Text>
-                      <Text style={{ fontSize: 12, color: theme.primary, fontWeight: '600', marginTop: 1 }}>
-                        📞 {item.phone || 'No phone recorded'}
-                      </Text>
-                    </View>
+                  <Ionicons name="expand-outline" size={14} color={theme.primary} />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.primary }}>Full Screen</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  onPress={() => setCustomerDirectoryModalVisible(false)}
+                  style={{
+                    padding: 4,
+                    borderRadius: 16,
+                  }}
+                >
+                  <Ionicons name="close" size={24} color={theme.text} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Scrollable Modal Body: Ensures form & buttons never get clipped */}
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 20 }}
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Search Customers Bar + Add Customer */}
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                <View style={[styles.pickerSearch, { backgroundColor: theme.background, borderColor: theme.border, flex: 1, marginBottom: 0 }]}>
+                  <Ionicons name="search" size={18} color={theme.textSecondary} />
+                  <Input
+                    placeholder="Search by name or mobile number..."
+                    value={customerDirectorySearch}
+                    onChangeText={setCustomerDirectorySearch}
+                    style={styles.pickerSearchInput}
+                    containerStyle={styles.pickerSearchInputContainer}
+                  />
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowAddCustomerModal(!showAddCustomerModal)}
+                  style={{
+                    backgroundColor: showAddCustomerModal ? theme.textSecondary : theme.primary,
+                    paddingHorizontal: 14,
+                    borderRadius: 12,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexDirection: 'row',
+                    gap: 4
+                  }}
+                >
+                  <Ionicons name={showAddCustomerModal ? "close-outline" : "person-add-outline"} size={16} color="#fff" />
+                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>
+                    {showAddCustomerModal ? 'Close Form' : '+ New'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Quick Add Customer Form */}
+              {showAddCustomerModal && (
+                <Card style={{ marginBottom: 14, borderColor: theme.primary, borderWidth: 1.5, padding: 14, backgroundColor: theme.background }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: theme.text }}>
+                      Create Customer Profile
+                    </Text>
+                    <TouchableOpacity onPress={() => setShowAddCustomerModal(false)}>
+                      <Ionicons name="close-circle-outline" size={18} color={theme.textSecondary} />
+                    </TouchableOpacity>
                   </View>
 
-                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                    <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
-                      <Text style={{ fontSize: 10, fontWeight: '800', color: '#16A34A' }}>
-                        {item.totalVisits} {item.totalVisits === 1 ? 'Bill' : 'Bills'}
-                      </Text>
-                    </View>
-                    {item.totalSpend > 0 && (
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>
-                        PKR {item.totalSpend.toLocaleString('en-IN')}
-                      </Text>
-                    )}
+                  <Input
+                    label="Customer Name *"
+                    placeholder="e.g. Ahmed Raza / Shop 4"
+                    value={newCustName}
+                    onChangeText={setNewCustName}
+                  />
+                  <Input
+                    label="Customer Mobile"
+                    placeholder="e.g. 03001234567"
+                    value={newCustPhone}
+                    onChangeText={setNewCustPhone}
+                    keyboardType="phone-pad"
+                  />
+                  <Input
+                    label="Address / Area (Optional)"
+                    placeholder="e.g. Saddar, Karachi"
+                    value={newCustAddress}
+                    onChangeText={setNewCustAddress}
+                  />
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                    <Button
+                      title="Cancel"
+                      variant="outline"
+                      size="medium"
+                      onPress={() => setShowAddCustomerModal(false)}
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      title="Save Customer Profile"
+                      variant="primary"
+                      size="medium"
+                      onPress={async () => {
+                        if (!newCustName.trim()) {
+                          Alert.alert('Required', 'Please enter customer name');
+                          return;
+                        }
+                        setAddingCustomer(true);
+                        try {
+                          const added = await addCustomer(newCustName, newCustPhone, newCustAddress);
+                          setCustomerName(added.name);
+                          setCustomerPhone(added.phone);
+                          setShowAddCustomerModal(false);
+                          setCustomerDirectoryModalVisible(false);
+                          setNewCustName('');
+                          setNewCustPhone('');
+                          setNewCustAddress('');
+                          if (Platform.OS === 'web') window.alert('Customer profile created successfully!');
+                          else Alert.alert('Success', 'Customer profile created successfully!');
+                        } catch (e: any) {
+                          Alert.alert('Error', e.message || 'Failed to create customer');
+                        } finally {
+                          setAddingCustomer(false);
+                        }
+                      }}
+                      loading={addingCustomer}
+                      style={{ flex: 1.6 }}
+                    />
                   </View>
-                </TouchableOpacity>
+                </Card>
               )}
-              ListEmptyComponent={
-                <View style={{ paddingVertical: 30, alignItems: 'center' }}>
-                  <Ionicons name="people-outline" size={36} color={theme.textSecondary} />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text, marginTop: 8 }}>
+
+              {/* Customer List Items */}
+              {filteredCustomerDirectory.length === 0 ? (
+                <View style={{ paddingVertical: 32, alignItems: 'center' }}>
+                  <Ionicons name="people-outline" size={40} color={theme.textSecondary + '70'} />
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text, marginTop: 10 }}>
                     No matching customers found
                   </Text>
-                  <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4, textAlign: 'center' }}>
                     New customers are automatically remembered upon billing.
                   </Text>
                 </View>
-              }
-            />
+              ) : (
+                filteredCustomerDirectory.map((item, index) => (
+                  <TouchableOpacity
+                    key={item.phone || `${item.name}_${index}`}
+                    onPress={() => handleSelectCustomer(item)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingVertical: 12,
+                      paddingHorizontal: 12,
+                      borderRadius: 12,
+                      backgroundColor: theme.background,
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                      marginBottom: 8,
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                      <View style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: 19,
+                        backgroundColor: theme.primary + '15',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}>
+                        <Ionicons name="person" size={17} color={theme.primary} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>
+                          {item.name}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: theme.primary, fontWeight: '600', marginTop: 1 }}>
+                          📞 {item.phone || 'No phone recorded'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                      <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: '#16A34A' }}>
+                          {item.totalVisits} {item.totalVisits === 1 ? 'Bill' : 'Bills'}
+                        </Text>
+                      </View>
+                      {item.totalSpend > 0 && (
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>
+                          PKR {item.totalSpend.toLocaleString('en-IN')}
+                        </Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
           </Card>
         </View>
       </Modal>
@@ -3096,15 +3537,21 @@ const styles = StyleSheet.create({
   pickerOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end',
+    alignItems: Platform.OS === 'web' ? 'center' : 'stretch',
+    padding: Platform.OS === 'web' ? 20 : 0,
   },
   pickerContainer: {
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
+    borderBottomLeftRadius: Platform.OS === 'web' ? 24 : 0,
+    borderBottomRightRadius: Platform.OS === 'web' ? 24 : 0,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
-    height: '75%',
+    height: Platform.OS === 'web' ? 'auto' : '80%',
+    maxHeight: Platform.OS === 'web' ? '90%' : '85%',
+    width: Platform.OS === 'web' ? '100%' : '100%',
+    maxWidth: Platform.OS === 'web' ? 640 : undefined,
+    alignSelf: Platform.OS === 'web' ? 'center' : 'auto',
   },
   pickerHeader: {
     flexDirection: 'row',
