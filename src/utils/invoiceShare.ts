@@ -209,19 +209,44 @@ export function formatCustomerPhoneForWhatsApp(phone: string): string {
 }
 
 /**
+ * Shortens a long URL using TinyURL with timeout and safe fallback
+ */
+export async function shortenUrl(longUrl: string): Promise<string> {
+  if (!longUrl || longUrl.length < 50) return longUrl;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const short = (await res.text()).trim();
+      if (short && short.startsWith('http')) {
+        return short;
+      }
+    }
+  } catch (err) {
+    console.warn('[InvoiceShare] URL shortening fallback to long URL:', err);
+  }
+  return longUrl;
+}
+
+/**
  * Crafts professional WhatsApp message with merchant name, bill total, date, and link
  */
-export function getWhatsAppInvoiceMessage(
+export async function getWhatsAppInvoiceMessage(
   business: Partial<UserSession>,
   invoice: Invoice,
   items: InvoiceItem[]
-): {
+): Promise<{
   message: string;
   url: string;
   cleanPhone: string;
   formattedPhone: string;
-} {
-  const url = getInvoicePublicUrl(business, invoice, items);
+}> {
+  const rawUrl = getInvoicePublicUrl(business, invoice, items);
+  const url = await shortenUrl(rawUrl);
 
   const formattedDate = new Date(invoice.createdAt).toLocaleDateString('en-PK', {
     day: 'numeric',
@@ -267,7 +292,7 @@ export async function copyWhatsAppInvoiceToClipboard(
   invoice: Invoice,
   items: InvoiceItem[]
 ): Promise<boolean> {
-  const { message } = getWhatsAppInvoiceMessage(business, invoice, items);
+  const { message } = await getWhatsAppInvoiceMessage(business, invoice, items);
   try {
     if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(message);
@@ -293,7 +318,7 @@ export async function openWhatsAppInvoice(
   target: 'web' | 'app' | 'auto' = 'web'
 ): Promise<void> {
   const phoneToUse = customPhone || invoice.customerPhone;
-  const { message } = getWhatsAppInvoiceMessage(business, invoice, items);
+  const { message } = await getWhatsAppInvoiceMessage(business, invoice, items);
   const formattedPhone = formatCustomerPhoneForWhatsApp(phoneToUse);
 
   if (!formattedPhone || formattedPhone.length < 10) {
