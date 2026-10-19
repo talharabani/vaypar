@@ -18,6 +18,7 @@ import { Input } from '../components/Input';
 import { CustomerNameInput } from '../components/CustomerNameInput';
 import { CustomerPhoneInput } from '../components/CustomerPhoneInput';
 import { ReceiptModal } from '../components/ReceiptModal';
+import { ReturnExchangeReceiptModal } from '../components/ReturnExchangeReceiptModal';
 import ScreenWrapper from '../components/ScreenWrapper';
 import { useAuth } from '../context/AuthContext';
 import { useDatabase } from '../context/DatabaseContext';
@@ -84,6 +85,8 @@ export default function BillsScreen() {
   const [processingReturn, setProcessingReturn] = useState(false);
   const [searchReturnInvoice, setSearchReturnInvoice] = useState('');
   const [searchReturnsHistory, setSearchReturnsHistory] = useState('');
+  const [selectedReturnRecord, setSelectedReturnRecord] = useState<sqlite.ReturnExchange | null>(null);
+  const [returnReceiptModalVisible, setReturnReceiptModalVisible] = useState(false);
 
   // Customer Directory Add Customer State
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
@@ -452,7 +455,7 @@ export default function BillsScreen() {
     }
     setProcessingReturn(true);
     try {
-      await createReturnExchange({
+      const createdRecord = await createReturnExchange({
         invoiceId: returnInvoice?.id || undefined,
         customerName: returnInvoice?.customerName || customerName.trim() || 'Customer',
         customerPhone: returnInvoice?.customerPhone || customerPhone.trim() || '',
@@ -470,21 +473,16 @@ export default function BillsScreen() {
         notes: returnNotes.trim() || undefined,
       });
 
-      const successMsg = returnType === 'exchange'
-        ? 'Exchange processed successfully!'
-        : 'Return & refund completed successfully!';
-      if (Platform.OS === 'web') {
-        window.alert(successMsg);
-      } else {
-        Alert.alert('Completed', successMsg);
-      }
-
       setReturnSelectedItemId('');
       setReturnQty('1');
       setReturnReplacementProductId('');
       setReturnReplacementQty('1');
       setReturnNotes('');
       setReturnsSegment('history');
+
+      // Open Voucher & Thermal Print Modal directly
+      setSelectedReturnRecord(createdRecord);
+      setReturnReceiptModalVisible(true);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to process return/exchange.');
     } finally {
@@ -2297,6 +2295,31 @@ export default function BillsScreen() {
                             {isEx ? (rec.differenceAmount ? (rec.differenceAmount > 0 ? `+PKR ${rec.differenceAmount.toFixed(0)}` : `-PKR ${Math.abs(rec.differenceAmount).toFixed(0)}`) : 'Even Exchange') : `Refund: PKR ${(rec.refundAmount || 0).toFixed(0)}`}
                           </Text>
                         </View>
+
+                        <View style={{ marginTop: 8, flexDirection: 'row', justifyContent: 'flex-end' }}>
+                          <TouchableOpacity
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 6,
+                              paddingVertical: 5,
+                              paddingHorizontal: 10,
+                              backgroundColor: theme.primary + '15',
+                              borderRadius: 6,
+                              borderWidth: 1,
+                              borderColor: theme.primary + '30',
+                            }}
+                            onPress={() => {
+                              setSelectedReturnRecord(rec);
+                              setReturnReceiptModalVisible(true);
+                            }}
+                          >
+                            <Ionicons name="receipt-outline" size={14} color={theme.primary} />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: theme.primary }}>
+                              View & Print Slip
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
                       </Card>
                     );
                   })
@@ -2730,6 +2753,16 @@ export default function BillsScreen() {
           setSelectedInvoice(null);
           setSelectedInvoiceItems([]);
           refreshData(); // Refresh metrics
+        }}
+      />
+
+      {/* Return & Exchange Thermal Receipt / Share Modal */}
+      <ReturnExchangeReceiptModal
+        visible={returnReceiptModalVisible}
+        record={selectedReturnRecord}
+        onClose={() => {
+          setReturnReceiptModalVisible(false);
+          setSelectedReturnRecord(null);
         }}
       />
     </ScreenWrapper>

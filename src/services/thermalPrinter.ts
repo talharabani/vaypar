@@ -1,6 +1,6 @@
 import { Platform, Alert } from 'react-native';
 import * as Print from 'expo-print';
-import { Invoice, InvoiceItem } from './sqlite';
+import { Invoice, InvoiceItem, ReturnExchange } from './sqlite';
 import { UserSession } from '../store/useAuthStore';
 
 export interface ThermalReceipt {
@@ -832,3 +832,395 @@ export async function simulatePrint(
     }, 1200);
   });
 }
+
+/**
+ * Generates raw ESC/POS command bytes and plain text for Return & Exchange Vouchers
+ */
+export function generateReturnExchangeReceipt(
+  business: Partial<UserSession>,
+  record: ReturnExchange
+): ThermalReceipt {
+  const plainLines: string[] = [];
+  const byteArrays: number[][] = [];
+
+  const addLine = (text: string, formatCmds: number[] = []) => {
+    let alignTag = '[LEFT] ';
+    if (formatCmds === COMMANDS.ALIGN_CENTER) {
+      alignTag = '[CENTER] ';
+    } else if (formatCmds === COMMANDS.ALIGN_RIGHT) {
+      alignTag = '[RIGHT] ';
+    }
+    plainLines.push(alignTag + text);
+
+    const textBytes = Array.from(text).map(char => char.charCodeAt(0));
+    byteArrays.push(formatCmds);
+    byteArrays.push(textBytes);
+    byteArrays.push(COMMANDS.LINE_FEED);
+  };
+
+  const d = new Date(record.createdAt);
+  const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const timeStr = d.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' });
+  const cleanId = record.id.replace(/^ret_/i, '').toUpperCase();
+  const voucherNo = cleanId.substring(0, 8);
+  const isExchange = record.type === 'exchange';
+  const title = isExchange ? 'EXCHANGE VOUCHER' : 'RETURN & REFUND SLIP';
+  const customer = record.customerName || 'Valued Customer';
+  const taxId = (business as any).taxNumber || (business as any).ntnNumber || (business as any).gstin || '';
+
+  // 1. Reset
+  byteArrays.push(COMMANDS.RESET);
+
+  // 2. Business Name
+  const busName = business.businessName || business.name || 'MY BUSINESS';
+  plainLines.push(`[CENTER, DOUBLE-SIZE] ${busName}`);
+  byteArrays.push(COMMANDS.ALIGN_CENTER);
+  byteArrays.push(COMMANDS.TEXT_SIZE_DOUBLE);
+  byteArrays.push(COMMANDS.BOLD_ON);
+  byteArrays.push(Array.from(busName).map(c => c.charCodeAt(0)));
+  byteArrays.push(COMMANDS.LINE_FEED);
+  byteArrays.push(COMMANDS.TEXT_SIZE_NORMAL);
+  byteArrays.push(COMMANDS.BOLD_OFF);
+
+  if (business.address) addLine(business.address, COMMANDS.ALIGN_CENTER);
+  if (business.phone) addLine(`Tel: ${business.phone}`, COMMANDS.ALIGN_CENTER);
+  if (taxId) addLine(`GST/NTN: ${taxId}`, COMMANDS.ALIGN_CENTER);
+
+  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
+  addLine(`*** ${title} ***`, COMMANDS.ALIGN_CENTER);
+  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
+
+  addLine(`Customer: ${customer}`, COMMANDS.ALIGN_LEFT);
+  if (record.customerPhone) addLine(`Phone: ${record.customerPhone}`, COMMANDS.ALIGN_LEFT);
+  addLine(`Date: ${dateStr}   Time: ${timeStr}`, COMMANDS.ALIGN_LEFT);
+  addLine(`Slip No: #${voucherNo}`, COMMANDS.ALIGN_LEFT);
+  if (record.invoiceId) {
+    addLine(`Ref Bill: #${record.invoiceId.replace(/^inv_/i, '').substring(0, 8).toUpperCase()}`, COMMANDS.ALIGN_LEFT);
+  }
+  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
+
+  // Returned item section
+  addLine('[RETURNED ITEM]', COMMANDS.ALIGN_LEFT);
+  addLine(`${record.quantity}x ${record.originalProductName}`, COMMANDS.ALIGN_LEFT);
+  addLine(`Condition: ${record.condition === 'resellable' ? 'Restocked' : 'Damaged'}`, COMMANDS.ALIGN_LEFT);
+  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
+
+  if (isExchange) {
+    addLine('[REPLACEMENT ITEM]', COMMANDS.ALIGN_LEFT);
+    addLine(`${record.replacementQuantity || 1}x ${record.replacementProductName || 'Replacement'}`, COMMANDS.ALIGN_LEFT);
+    addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
+
+    const diff = record.differenceAmount || 0;
+    if (diff > 0) {
+      const line = `Customer Paid: Rs. ${diff.toFixed(2)}`;
+      plainLines.push(`[BOLD, RIGHT] ${line}`);
+      byteArrays.push(COMMANDS.ALIGN_RIGHT);
+      byteArrays.push(COMMANDS.BOLD_ON);
+      byteArrays.push(Array.from(line).map(c => c.charCodeAt(0)));
+      byteArrays.push(COMMANDS.LINE_FEED);
+      byteArrays.push(COMMANDS.BOLD_OFF);
+    } else if (diff < 0) {
+      const line = `Store Refunded: Rs. ${Math.abs(diff).toFixed(2)}`;
+      plainLines.push(`[BOLD, RIGHT] ${line}`);
+      byteArrays.push(COMMANDS.ALIGN_RIGHT);
+      byteArrays.push(COMMANDS.BOLD_ON);
+      byteArrays.push(Array.from(line).map(c => c.charCodeAt(0)));
+      byteArrays.push(COMMANDS.LINE_FEED);
+      byteArrays.push(COMMANDS.BOLD_OFF);
+    } else {
+      const line = `Even Exchange: Rs. 0.00`;
+      plainLines.push(`[BOLD, RIGHT] ${line}`);
+      byteArrays.push(COMMANDS.ALIGN_RIGHT);
+      byteArrays.push(COMMANDS.BOLD_ON);
+      byteArrays.push(Array.from(line).map(c => c.charCodeAt(0)));
+      byteArrays.push(COMMANDS.LINE_FEED);
+      byteArrays.push(COMMANDS.BOLD_OFF);
+    }
+  } else {
+    const refund = record.refundAmount || 0;
+    const line = `Cash Refund: Rs. ${refund.toFixed(2)}`;
+    plainLines.push(`[BOLD, RIGHT] ${line}`);
+    byteArrays.push(COMMANDS.ALIGN_RIGHT);
+    byteArrays.push(COMMANDS.BOLD_ON);
+    byteArrays.push(Array.from(line).map(c => c.charCodeAt(0)));
+    byteArrays.push(COMMANDS.LINE_FEED);
+    byteArrays.push(COMMANDS.BOLD_OFF);
+  }
+
+  addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
+  if (record.reason) addLine(`Reason: ${record.reason}`, COMMANDS.ALIGN_LEFT);
+  if (record.notes) addLine(`Notes: ${record.notes}`, COMMANDS.ALIGN_LEFT);
+  addLine('Thank You, Visit Again.', COMMANDS.ALIGN_CENTER);
+
+  byteArrays.push(COMMANDS.LINE_FEED);
+  byteArrays.push(COMMANDS.LINE_FEED);
+  byteArrays.push(COMMANDS.PAPER_CUT);
+
+  const flatBytes: number[] = [];
+  byteArrays.forEach(arr => {
+    flatBytes.push(...arr);
+  });
+
+  return {
+    plainText: plainLines.join('\n'),
+    escposBytes: new Uint8Array(flatBytes),
+  };
+}
+
+/**
+ * Generates an exact 58mm or 80mm single-sided thermal receipt slip HTML for Return & Exchange
+ */
+export function generateReturnExchangeSlipHTML(
+  business: Partial<UserSession>,
+  record: ReturnExchange,
+  paperWidth: '58mm' | '80mm' = '80mm'
+): string {
+  const is58mm = paperWidth === '58mm';
+  const widthMm = is58mm ? '58mm' : '80mm';
+  const contentWidthMm = is58mm ? '52mm' : '74mm';
+
+  const cleanId = record.id.replace(/^ret_/i, '').toUpperCase();
+  const voucherNo = cleanId.substring(0, 8);
+  const isExchange = record.type === 'exchange';
+  const title = isExchange ? 'EXCHANGE VOUCHER' : 'RETURN & REFUND SLIP';
+
+  const d = new Date(record.createdAt);
+  const dateFormatted = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const timeFormatted = d.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+  const taxId = (business as any).taxNumber || (business as any).ntnNumber || (business as any).gstin || '';
+  const diff = record.differenceAmount || 0;
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${title} - #${voucherNo}</title>
+        <style>
+          @page {
+            size: ${widthMm} auto;
+            margin: 0mm;
+          }
+          * {
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          html, body {
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+          }
+          .receipt {
+            width: ${contentWidthMm} !important;
+            max-width: ${contentWidthMm} !important;
+            margin: 0 auto;
+            padding: ${is58mm ? '3mm 1mm' : '5mm 2mm'};
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace, sans-serif;
+            font-size: ${is58mm ? '11.5px' : '13px'};
+            line-height: 1.25;
+            color: #000000;
+          }
+          .store-name {
+            font-size: ${is58mm ? '15px' : '18px'};
+            font-weight: 900;
+            text-align: center;
+            margin-bottom: 2px;
+            letter-spacing: 0.2px;
+            text-transform: uppercase;
+          }
+          .store-sub {
+            font-size: ${is58mm ? '10px' : '11.5px'};
+            text-align: center;
+            font-weight: 600;
+            margin: 1px 0;
+            color: #111;
+          }
+          .store-tax {
+            font-size: ${is58mm ? '10px' : '11.5px'};
+            text-align: center;
+            font-weight: 700;
+            margin: 2px 0 3px 0;
+          }
+          .divider-solid {
+            border-top: 1.5px solid #000000;
+            margin: 4px 0;
+          }
+          .voucher-title {
+            text-align: center;
+            font-size: ${is58mm ? '12px' : '14px'};
+            font-weight: 900;
+            letter-spacing: 1px;
+            padding: 3px 0;
+          }
+          .customer-line {
+            font-size: ${is58mm ? '11px' : '12.5px'};
+            font-weight: 700;
+            padding: 1px 0;
+          }
+          .meta-grid {
+            display: flex;
+            justify-content: space-between;
+            font-size: ${is58mm ? '10.5px' : '12px'};
+            font-weight: 600;
+            line-height: 1.3;
+          }
+          .section-tag {
+            font-weight: 900;
+            font-size: ${is58mm ? '11px' : '12px'};
+            margin: 4px 0 2px 0;
+            text-transform: uppercase;
+          }
+          .item-box {
+            padding: 4px 0;
+            font-size: ${is58mm ? '11px' : '12.5px'};
+          }
+          .item-title {
+            font-weight: 800;
+          }
+          .item-sub {
+            font-size: ${is58mm ? '10px' : '11.5px'};
+            color: #333;
+          }
+          .grand-total-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: ${is58mm ? '13px' : '15px'};
+            font-weight: 900;
+            margin: 5px 0 3px 0;
+          }
+          .footer-section {
+            text-align: center;
+            font-size: ${is58mm ? '10.5px' : '11.5px'};
+            margin-top: 6px;
+            line-height: 1.35;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="receipt">
+          <div class="store-name">${business.businessName || business.name || 'MY BUSINESS'}</div>
+          ${business.address ? `<div class="store-sub">${business.address}</div>` : ''}
+          ${business.phone ? `<div class="store-sub">Tel: ${business.phone}</div>` : ''}
+          ${taxId ? `<div class="store-tax">GST / NTN: ${taxId}</div>` : ''}
+          
+          <div class="divider-solid"></div>
+          <div class="voucher-title">*** ${title} ***</div>
+          <div class="divider-solid"></div>
+
+          <div class="customer-line">Customer: ${record.customerName || 'Valued Customer'}</div>
+          ${record.customerPhone ? `<div class="customer-line">Phone: ${record.customerPhone}</div>` : ''}
+
+          <div class="meta-grid" style="margin-top: 3px;">
+            <div>Date: ${dateFormatted} ${timeFormatted}</div>
+            <div>Slip: #${voucherNo}</div>
+          </div>
+          ${record.invoiceId ? `<div style="font-size: ${is58mm ? '10.5px' : '11.5px'}; font-weight: 600; margin-top: 2px;">Ref Bill: #${record.invoiceId.replace(/^inv_/i, '').substring(0, 8).toUpperCase()}</div>` : ''}
+
+          <div class="divider-solid"></div>
+
+          <div class="section-tag">[ Returned Product ]</div>
+          <div class="item-box">
+            <div class="item-title">${record.quantity}x ${record.originalProductName}</div>
+            <div class="item-sub">Condition: ${record.condition === 'resellable' ? 'Restocked to Inventory' : 'Damaged / Discarded'}</div>
+          </div>
+
+          ${isExchange ? `
+            <div class="divider-solid"></div>
+            <div class="section-tag">[ Replacement Product ]</div>
+            <div class="item-box">
+              <div class="item-title">${record.replacementQuantity || 1}x ${record.replacementProductName || 'Replacement'}</div>
+            </div>
+
+            <div class="divider-solid"></div>
+            <div class="grand-total-row">
+              <span>${diff > 0 ? 'Customer Paid Difference' : diff < 0 ? 'Store Refunded Difference' : 'Settlement'}</span>
+              <span>Rs. ${Math.abs(diff).toFixed(2)}</span>
+            </div>
+          ` : `
+            <div class="divider-solid"></div>
+            <div class="grand-total-row">
+              <span>Cash Refunded</span>
+              <span>Rs. ${(record.refundAmount || 0).toFixed(2)}</span>
+            </div>
+          `}
+
+          <div class="divider-solid"></div>
+
+          ${record.reason ? `<div style="font-size: ${is58mm ? '10px' : '11.5px'}; margin-top: 2px;"><strong>Reason:</strong> ${record.reason}</div>` : ''}
+          ${record.notes ? `<div style="font-size: ${is58mm ? '10px' : '11.5px'}; margin-top: 2px;"><strong>Notes:</strong> ${record.notes}</div>` : ''}
+
+          <div class="footer-section">
+            <div>Exchange & return subject to store policy.</div>
+            <div style="font-weight: 700; margin-top: 2px;">Thank You, Visit Again.</div>
+          </div>
+          <br/>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+/**
+ * Triggers direct thermal receipt printing for Return & Exchange
+ */
+export async function printReturnExchangeSlip(
+  business: Partial<UserSession>,
+  record: ReturnExchange,
+  paperWidth: '58mm' | '80mm' = '80mm'
+): Promise<void> {
+  const html = generateReturnExchangeSlipHTML(business, record, paperWidth);
+
+  if (Platform.OS === 'web') {
+    try {
+      const existing = document.getElementById('thermal-print-iframe');
+      if (existing) {
+        existing.remove();
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.id = 'thermal-print-iframe';
+      iframe.style.position = 'fixed';
+      iframe.style.left = '-9999px';
+      iframe.style.top = '0px';
+      iframe.style.width = paperWidth === '58mm' ? '300px' : '400px';
+      iframe.style.height = '1200px';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0.01';
+      iframe.style.pointerEvents = 'none';
+      iframe.style.zIndex = '-999';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow?.document;
+      if (doc) {
+        doc.open();
+        doc.write(html);
+        doc.close();
+
+        setTimeout(() => {
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+          } catch (err) {
+            console.warn('Iframe print failed, opening popup window:', err);
+            openThermalPrintWindow(html);
+          }
+        }, 350);
+        return;
+      }
+    } catch (e) {
+      console.warn('Iframe print error, falling back to window:', e);
+      openThermalPrintWindow(html);
+      return;
+    }
+    return;
+  }
+
+  // Mobile: native print dialog formatted for thermal receipt
+  await Print.printAsync({ html });
+}
+

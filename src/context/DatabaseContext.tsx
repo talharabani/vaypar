@@ -32,7 +32,7 @@ interface DatabaseContextType {
   deleteInvoice: (id: string) => Promise<void>;
   
   // Returns & Exchanges Operations
-  createReturnExchange: (data: Omit<sqlite.ReturnExchange, 'id' | 'businessId' | 'createdAt' | 'synced' | 'lastUpdated' | 'deleted'>) => Promise<void>;
+  createReturnExchange: (data: Omit<sqlite.ReturnExchange, 'id' | 'businessId' | 'createdAt' | 'synced' | 'lastUpdated' | 'deleted'>) => Promise<sqlite.ReturnExchange>;
 
   // Customer Operations
   addCustomer: (name: string, phone: string, address?: string, notes?: string) => Promise<sqlite.Customer>;
@@ -382,7 +382,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     return invoiceId;
   };
 
-  const createReturnExchange = async (data: Omit<sqlite.ReturnExchange, 'id' | 'businessId' | 'createdAt' | 'synced' | 'lastUpdated' | 'deleted'>) => {
+  const createReturnExchange = async (data: Omit<sqlite.ReturnExchange, 'id' | 'businessId' | 'createdAt' | 'synced' | 'lastUpdated' | 'deleted'>): Promise<sqlite.ReturnExchange> => {
     if (!user) throw new Error('Authentication required');
     const now = new Date().toISOString();
     const id = 'ret_' + Math.random().toString(36).substring(2, 15);
@@ -403,6 +403,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     await logActivity(`Return/Exchange: ${actionDesc} for customer "${data.customerName || 'Walk-in'}"`);
     await refreshData();
     triggerSync();
+    return record;
   };
 
   const addCustomer = async (name: string, phone: string, address?: string, notes?: string): Promise<sqlite.Customer> => {

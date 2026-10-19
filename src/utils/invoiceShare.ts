@@ -1,5 +1,5 @@
 import { Platform, Linking, Alert } from 'react-native';
-import { Invoice, InvoiceItem } from '../services/sqlite';
+import { Invoice, InvoiceItem, ReturnExchange } from '../services/sqlite';
 import { UserSession } from '../store/useAuthStore';
 import { generateInvoiceHTML } from '../services/pdfGenerator';
 
@@ -358,4 +358,127 @@ export async function openWhatsAppInvoice(
     }
   }
 }
+
+/**
+ * Compiles a clean WhatsApp text message for Return & Exchange Vouchers
+ */
+export function getWhatsAppReturnExchangeMessage(
+  business: Partial<UserSession>,
+  record: ReturnExchange
+): { message: string; formattedPhone: string } {
+  const formattedDate = new Date(record.createdAt).toLocaleDateString('en-PK', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  const bizName = business.businessName || 'Our Shop';
+  const custName = record.customerName?.trim() || 'Valued Customer';
+  const isExchange = record.type === 'exchange';
+  const cleanId = record.id.replace(/^ret_/i, '').toUpperCase();
+  const diff = record.differenceAmount || 0;
+
+  let settlementText = '';
+  if (isExchange) {
+    if (diff > 0) {
+      settlementText = `💵 *Customer Paid Difference:* PKR ${diff.toFixed(0)}`;
+    } else if (diff < 0) {
+      settlementText = `💵 *Store Refunded Difference:* PKR ${Math.abs(diff).toFixed(0)}`;
+    } else {
+      settlementText = `⚖️ *Even Exchange:* PKR 0`;
+    }
+  } else {
+    settlementText = `💵 *Cash Refunded:* PKR ${(record.refundAmount || 0).toFixed(0)}`;
+  }
+
+  const message =
+    `Assalam-o-Alaikum *${custName}*,\n\n` +
+    `*${bizName}* - ${isExchange ? 'Product Exchange Voucher' : 'Return & Refund Voucher'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📋 *Voucher #:* #${cleanId}\n` +
+    `📅 *Date:* ${formattedDate}\n` +
+    `👤 *Customer:* ${custName}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🔄 *Returned Item:*\n` +
+    `• ${record.quantity}x ${record.originalProductName} (${record.condition === 'resellable' ? 'Restocked' : 'Damaged'})\n` +
+    (isExchange ? `\n🎁 *Replacement Item:*\n• ${record.replacementQuantity || 1}x ${record.replacementProductName || 'Item'}\n` : '') +
+    `\n${settlementText}\n` +
+    (record.reason ? `📝 *Reason:* ${record.reason}\n` : '') +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `Thank you for shopping with us! JazakAllah Khair.\n` +
+    `*${bizName}*`;
+
+  const cleanPhone = record.customerPhone ? record.customerPhone.trim() : '';
+  const formattedPhone = formatCustomerPhoneForWhatsApp(cleanPhone);
+
+  return { message, formattedPhone };
+}
+
+/**
+ * Copies the complete WhatsApp return/exchange message to the clipboard
+ */
+export async function copyWhatsAppReturnExchangeToClipboard(
+  business: Partial<UserSession>,
+  record: ReturnExchange
+): Promise<boolean> {
+  const { message } = getWhatsAppReturnExchangeMessage(business, record);
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(message);
+      return true;
+    }
+  } catch (err) {
+    console.warn('Clipboard write failed:', err);
+  }
+  return false;
+}
+
+/**
+ * Handles opening WhatsApp directly to the customer's chat for Return & Exchange
+ */
+export async function openWhatsAppReturnExchange(
+  business: Partial<UserSession>,
+  record: ReturnExchange,
+  customPhone?: string,
+  target: 'web' | 'app' | 'auto' = 'web'
+): Promise<void> {
+  const phoneToUse = customPhone || record.customerPhone;
+  const { message } = getWhatsAppReturnExchangeMessage(business, record);
+  const formattedPhone = formatCustomerPhoneForWhatsApp(phoneToUse || '');
+
+  if (!formattedPhone || formattedPhone.length < 10) {
+    Alert.alert('Customer Phone Required', 'Customer ka valid mobile number enter karein (e.g. 03001234567).');
+    return;
+  }
+
+  const encodedMsg = encodeURIComponent(message);
+  const webChatUrl = `https://web.whatsapp.com/send/?phone=${formattedPhone}&text=${encodedMsg}`;
+  const appProtocolUrl = `whatsapp://send?phone=${formattedPhone}&text=${encodedMsg}`;
+
+  if (Platform.OS === 'web') {
+    if (target === 'app') {
+      try {
+        window.location.href = appProtocolUrl;
+      } catch {
+        window.open(webChatUrl, '_blank');
+      }
+    } else {
+      window.open(webChatUrl, '_blank');
+    }
+  } else {
+    try {
+      const canOpen = await Linking.canOpenURL(appProtocolUrl);
+      if (canOpen) {
+        await Linking.openURL(appProtocolUrl);
+      } else {
+        await Linking.openURL(webChatUrl);
+      }
+    } catch {
+      await Linking.openURL(webChatUrl);
+    }
+  }
+}
+
 

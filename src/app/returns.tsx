@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
+import { ReturnExchangeReceiptModal } from '../components/ReturnExchangeReceiptModal';
 import ScreenWrapper from '../components/ScreenWrapper';
 import { useAuth } from '../context/AuthContext';
 import { useDatabase } from '../context/DatabaseContext';
@@ -33,6 +34,10 @@ export default function ReturnsScreen() {
   } = useDatabase();
 
   const [activeSegment, setActiveSegment] = useState<'process' | 'history'>('process');
+
+  // Receipt Modal State
+  const [selectedReturnRecord, setSelectedReturnRecord] = useState<sqlite.ReturnExchange | null>(null);
+  const [receiptModalVisible, setReceiptModalVisible] = useState(false);
 
   // Process form states
   const [selectedInvoice, setSelectedInvoice] = useState<sqlite.Invoice | null>(null);
@@ -156,7 +161,7 @@ export default function ReturnsScreen() {
       const custName = selectedInvoice?.customerName || customCustomerName.trim() || 'Valued Customer';
       const custPhone = selectedInvoice?.customerPhone || customCustomerPhone.trim() || '';
 
-      await createReturnExchange({
+      const createdRecord = await createReturnExchange({
         invoiceId: selectedInvoice?.id || undefined,
         customerName: custName,
         customerPhone: custPhone,
@@ -174,16 +179,6 @@ export default function ReturnsScreen() {
         notes: returnNotes.trim() || undefined,
       });
 
-      const successMsg = returnType === 'exchange'
-        ? 'Exchange processed successfully! Inventory and balance adjusted.'
-        : `Return & refund completed! PKR ${returnCalculations.refundAmount.toFixed(0)} deducted from daily cash.`;
-
-      if (Platform.OS === 'web') {
-        window.alert(successMsg);
-      } else {
-        Alert.alert('Completed', successMsg);
-      }
-
       // Reset form
       setSelectedItemId('');
       setReturnQty('1');
@@ -192,6 +187,10 @@ export default function ReturnsScreen() {
       setReturnNotes('');
       setActiveSegment('history');
       refreshData();
+
+      // Open Voucher & Thermal Print Modal directly
+      setSelectedReturnRecord(createdRecord);
+      setReceiptModalVisible(true);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to process return/exchange.');
     } finally {
@@ -683,6 +682,31 @@ export default function ReturnsScreen() {
                         {isEx ? (rec.differenceAmount ? (rec.differenceAmount > 0 ? `+PKR ${rec.differenceAmount.toFixed(0)}` : `-PKR ${Math.abs(rec.differenceAmount).toFixed(0)}`) : 'Even Exchange') : `Refund: PKR ${(rec.refundAmount || 0).toFixed(0)}`}
                       </Text>
                     </View>
+
+                    <View style={{ marginTop: 8, flexDirection: 'row', justifyContent: 'flex-end' }}>
+                      <TouchableOpacity
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
+                          paddingVertical: 6,
+                          paddingHorizontal: 12,
+                          backgroundColor: theme.primary + '15',
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          borderColor: theme.primary + '30',
+                        }}
+                        onPress={() => {
+                          setSelectedReturnRecord(rec);
+                          setReceiptModalVisible(true);
+                        }}
+                      >
+                        <Ionicons name="receipt-outline" size={15} color={theme.primary} />
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>
+                          View & Print Slip
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                   </Card>
                 );
               })
@@ -690,6 +714,13 @@ export default function ReturnsScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Return & Exchange Thermal Receipt / Share Modal */}
+      <ReturnExchangeReceiptModal
+        visible={receiptModalVisible}
+        record={selectedReturnRecord}
+        onClose={() => setReceiptModalVisible(false)}
+      />
     </ScreenWrapper>
   );
 }
