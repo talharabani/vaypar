@@ -179,7 +179,6 @@ export default function BillsScreen() {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [invoiceCountryCode, setInvoiceCountryCode] = useState(() => detectCountryCode(user?.phone));
-  const [customerDirectoryModalVisible, setCustomerDirectoryModalVisible] = useState(false);
   const [customerDirectorySearch, setCustomerDirectorySearch] = useState('');
   const [phoneDropdownOpen, setPhoneDropdownOpen] = useState(false);
   const [nameDropdownOpen, setNameDropdownOpen] = useState(false);
@@ -308,7 +307,6 @@ export default function BillsScreen() {
     setSelectedCustomerMeta(item);
     setPhoneDropdownOpen(false);
     setNameDropdownOpen(false);
-    setCustomerDirectoryModalVisible(false);
   };
 
   const handlePhoneChange = (phone: string) => {
@@ -1169,69 +1167,27 @@ export default function BillsScreen() {
                 </Text>
               </View>
 
-              <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                <TouchableOpacity
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 4,
-                    backgroundColor: theme.primary + '15',
-                    paddingHorizontal: 10,
-                    paddingVertical: 5,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: theme.primary + '30',
-                  }}
-                  onPress={() => setCustomerDirectoryModalVisible(true)}
-                >
-                  <Ionicons name="people-outline" size={14} color={theme.primary} />
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.primary }}>
-                    Directory ({customerDirectory.length})
-                  </Text>
-                </TouchableOpacity>
-
+              {(customerName || customerPhone) ? (
                 <TouchableOpacity
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 4,
                     backgroundColor: theme.backgroundElement,
-                    paddingHorizontal: 9,
+                    paddingHorizontal: 10,
                     paddingVertical: 5,
                     borderRadius: 12,
                     borderWidth: 1,
                     borderColor: theme.border,
                   }}
-                  onPress={() => setActiveTab('customers')}
+                  onPress={handleClearCustomer}
                 >
-                  <Ionicons name="expand-outline" size={13} color={theme.textSecondary} />
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>
-                    Full Screen Tab
+                  <Ionicons name="close-circle-outline" size={14} color={theme.danger} />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.danger }}>
+                    Walk-in / Clear
                   </Text>
                 </TouchableOpacity>
-
-                {(customerName || customerPhone) && (
-                  <TouchableOpacity
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 4,
-                      backgroundColor: theme.backgroundElement,
-                      paddingHorizontal: 8,
-                      paddingVertical: 5,
-                      borderRadius: 12,
-                      borderWidth: 1,
-                      borderColor: theme.border,
-                    }}
-                    onPress={handleClearCustomer}
-                  >
-                    <Ionicons name="close-circle-outline" size={14} color={theme.danger} />
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: theme.danger }}>
-                      Walk-in
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+              ) : null}
             </View>
 
             {/* Frequent / Repeat Customers Quick Chips Bar */}
@@ -2892,244 +2848,6 @@ export default function BillsScreen() {
         </View>
       </Modal>
 
-      {/* ==========================================
-          CUSTOMER DIRECTORY MODAL
-          ========================================== */}
-      <Modal
-        visible={customerDirectoryModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setCustomerDirectoryModalVisible(false)}
-      >
-        <View style={styles.pickerOverlay}>
-          <Card style={[
-            styles.pickerContainer, 
-            { backgroundColor: theme.backgroundElement },
-            Platform.OS === 'web' && { maxHeight: '90%', width: '100%', maxWidth: 640 }
-          ]}>
-            {/* Modal Header */}
-            <View style={styles.pickerHeader}>
-              <View>
-                <Text style={[styles.pickerTitle, { color: theme.text }]}>Customer Directory</Text>
-                <Text style={{ fontSize: 11, color: theme.textSecondary }}>
-                  {filteredCustomerDirectory.length} Unique Customers Found
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <TouchableOpacity
-                  onPress={() => {
-                    setCustomerDirectoryModalVisible(false);
-                    setActiveTab('customers');
-                  }}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 5,
-                    backgroundColor: theme.primary + '18',
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
-                    borderRadius: 10,
-                    borderWidth: 1,
-                    borderColor: theme.primary + '35',
-                  }}
-                >
-                  <Ionicons name="expand-outline" size={14} color={theme.primary} />
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.primary }}>Full Screen</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  onPress={() => setCustomerDirectoryModalVisible(false)}
-                  style={{
-                    padding: 4,
-                    borderRadius: 16,
-                  }}
-                >
-                  <Ionicons name="close" size={24} color={theme.text} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Scrollable Modal Body: Ensures form & buttons never get clipped */}
-            <ScrollView
-              style={{ flex: 1 }}
-              contentContainerStyle={{ paddingBottom: 20 }}
-              showsVerticalScrollIndicator={true}
-              keyboardShouldPersistTaps="handled"
-            >
-              {/* Search Customers Bar + Add Customer */}
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-                <View style={[styles.pickerSearch, { backgroundColor: theme.background, borderColor: theme.border, flex: 1, marginBottom: 0 }]}>
-                  <Ionicons name="search" size={18} color={theme.textSecondary} />
-                  <Input
-                    placeholder="Search by name or mobile number..."
-                    value={customerDirectorySearch}
-                    onChangeText={setCustomerDirectorySearch}
-                    style={styles.pickerSearchInput}
-                    containerStyle={styles.pickerSearchInputContainer}
-                  />
-                </View>
-                <TouchableOpacity
-                  onPress={() => setShowAddCustomerModal(!showAddCustomerModal)}
-                  style={{
-                    backgroundColor: showAddCustomerModal ? theme.textSecondary : theme.primary,
-                    paddingHorizontal: 14,
-                    borderRadius: 12,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexDirection: 'row',
-                    gap: 4
-                  }}
-                >
-                  <Ionicons name={showAddCustomerModal ? "close-outline" : "person-add-outline"} size={16} color="#fff" />
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>
-                    {showAddCustomerModal ? 'Close Form' : '+ New'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Quick Add Customer Form */}
-              {showAddCustomerModal && (
-                <Card style={{ marginBottom: 14, borderColor: theme.primary, borderWidth: 1.5, padding: 14, backgroundColor: theme.background }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '800', color: theme.text }}>
-                      Create Customer Profile
-                    </Text>
-                    <TouchableOpacity onPress={() => setShowAddCustomerModal(false)}>
-                      <Ionicons name="close-circle-outline" size={18} color={theme.textSecondary} />
-                    </TouchableOpacity>
-                  </View>
-
-                  <Input
-                    label="Customer Name *"
-                    placeholder="e.g. Ahmed Raza / Shop 4"
-                    value={newCustName}
-                    onChangeText={setNewCustName}
-                  />
-                  <Input
-                    label="Customer Mobile"
-                    placeholder="e.g. 03001234567"
-                    value={newCustPhone}
-                    onChangeText={setNewCustPhone}
-                    keyboardType="phone-pad"
-                  />
-                  <Input
-                    label="Address / Area (Optional)"
-                    placeholder="e.g. Saddar, Karachi"
-                    value={newCustAddress}
-                    onChangeText={setNewCustAddress}
-                  />
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-                    <Button
-                      title="Cancel"
-                      variant="outline"
-                      size="medium"
-                      onPress={() => setShowAddCustomerModal(false)}
-                      style={{ flex: 1 }}
-                    />
-                    <Button
-                      title="Save Customer Profile"
-                      variant="primary"
-                      size="medium"
-                      onPress={async () => {
-                        if (!newCustName.trim()) {
-                          Alert.alert('Required', 'Please enter customer name');
-                          return;
-                        }
-                        setAddingCustomer(true);
-                        try {
-                          const added = await addCustomer(newCustName, newCustPhone, newCustAddress);
-                          setCustomerName(added.name);
-                          setCustomerPhone(added.phone);
-                          setShowAddCustomerModal(false);
-                          setCustomerDirectoryModalVisible(false);
-                          setNewCustName('');
-                          setNewCustPhone('');
-                          setNewCustAddress('');
-                          if (Platform.OS === 'web') window.alert('Customer profile created successfully!');
-                          else Alert.alert('Success', 'Customer profile created successfully!');
-                        } catch (e: any) {
-                          Alert.alert('Error', e.message || 'Failed to create customer');
-                        } finally {
-                          setAddingCustomer(false);
-                        }
-                      }}
-                      loading={addingCustomer}
-                      style={{ flex: 1.6 }}
-                    />
-                  </View>
-                </Card>
-              )}
-
-              {/* Customer List Items */}
-              {filteredCustomerDirectory.length === 0 ? (
-                <View style={{ paddingVertical: 32, alignItems: 'center' }}>
-                  <Ionicons name="people-outline" size={40} color={theme.textSecondary + '70'} />
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text, marginTop: 10 }}>
-                    No matching customers found
-                  </Text>
-                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4, textAlign: 'center' }}>
-                    New customers are automatically remembered upon billing.
-                  </Text>
-                </View>
-              ) : (
-                filteredCustomerDirectory.map((item, index) => (
-                  <TouchableOpacity
-                    key={item.phone || `${item.name}_${index}`}
-                    onPress={() => handleSelectCustomer(item)}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      paddingVertical: 12,
-                      paddingHorizontal: 12,
-                      borderRadius: 12,
-                      backgroundColor: theme.background,
-                      borderWidth: 1,
-                      borderColor: theme.border,
-                      marginBottom: 8,
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                      <View style={{
-                        width: 38,
-                        height: 38,
-                        borderRadius: 19,
-                        backgroundColor: theme.primary + '15',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}>
-                        <Ionicons name="person" size={17} color={theme.primary} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>
-                          {item.name}
-                        </Text>
-                        <Text style={{ fontSize: 12, color: theme.primary, fontWeight: '600', marginTop: 1 }}>
-                          📞 {item.phone || 'No phone recorded'}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                      <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
-                        <Text style={{ fontSize: 10, fontWeight: '800', color: '#16A34A' }}>
-                          {item.totalVisits} {item.totalVisits === 1 ? 'Bill' : 'Bills'}
-                        </Text>
-                      </View>
-                      {item.totalSpend > 0 && (
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>
-                          PKR {item.totalSpend.toLocaleString('en-IN')}
-                        </Text>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                ))
-              )}
-            </ScrollView>
-          </Card>
-        </View>
-      </Modal>
 
       {/* ==========================================
           PRODUCT PICKER MODAL
