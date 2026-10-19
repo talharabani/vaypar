@@ -177,10 +177,10 @@ export default function StaffScreen() {
       return setSalaryFormError('Please enter month in YYYY-MM format.');
     }
 
-    const bonusNum = parseFloat(payBonus) || 0;
-    const dedNum = parseFloat(payDeduction) || 0;
-
     try {
+      const bonusNum = parseFloat(payBonus) || 0;
+      const dedNum = parseFloat(payDeduction) || 0;
+      const totalPaid = Math.max(0, (selectedPayrollStaff.salary || 0) + bonusNum - dedNum);
       await payStaffSalary(
         selectedPayrollStaff.id,
         payMonth.trim(),
@@ -189,7 +189,10 @@ export default function StaffScreen() {
         dedNum,
         payNotes.trim()
       );
-      Alert.alert('Success', 'Salary payment logged successfully.');
+      Alert.alert(
+        'Salary Paid Successfully',
+        `PKR ${totalPaid.toLocaleString('en-IN')} paid to ${selectedPayrollStaff.name}. Recorded under Business Expenses ("Staff Salaries") and deducted from cashflow.`
+      );
       await loadSalaryHistory(selectedPayrollStaff.id);
       // Reset inputs
       setPayBonus('');
@@ -590,6 +593,13 @@ export default function StaffScreen() {
                   icon={<Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />}
                   onPress={handlePaySalarySubmit}
                 />
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingHorizontal: 4 }}>
+                  <Ionicons name="information-circle-outline" size={16} color={theme.textSecondary} />
+                  <Text style={{ fontSize: 11.5, color: theme.textSecondary, flex: 1 }}>
+                    Salary payouts automatically record under Business Expenses ("Staff Salaries") and are deducted from daily cashflow & net revenue.
+                  </Text>
+                </View>
               </Card>
 
               {/* Salary History */}

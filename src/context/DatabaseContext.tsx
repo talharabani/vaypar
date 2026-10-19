@@ -118,7 +118,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     setLoadingData(true);
     try {
       // Fetch core datasets scoped to the businessId
-      const [dbProducts, dbInvoices, dbExpenses, dbInstallments, dbCustomers, dbReturns] = await Promise.all([
+      let [dbProducts, dbInvoices, dbExpenses, dbInstallments, dbCustomers, dbReturns] = await Promise.all([
         sqlite.getProducts(user.businessId),
         sqlite.getInvoices(user.businessId),
         sqlite.getExpenses(user.businessId),
@@ -126,6 +126,40 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         sqlite.getCustomers(user.businessId),
         sqlite.getReturnsExchanges(user.businessId),
       ]);
+
+      // Auto-backfill existing salary payments into expenses so all cashflow & expenses are 100% accurate
+      try {
+        const salaryPayments = await sqlite.getSalaryPayments(user.businessId);
+        if (salaryPayments && salaryPayments.length > 0) {
+          const staffMembers = await sqlite.getStaffMembers(user.businessId);
+          for (const sal of salaryPayments) {
+            const expId = 'exp_' + sal.id;
+            const netAmount = Math.max(0, (sal.amount || 0) + (sal.bonus || 0) - (sal.deduction || 0));
+            const existingExp = dbExpenses.find(e => e.id === expId || e.id === 'exp_sal_' + sal.id);
+            if (!existingExp && netAmount > 0 && sal.status === 'paid') {
+              const staff = staffMembers.find(s => s.id === sal.userId);
+              const pDate = sal.paymentDate ? sal.paymentDate.split('T')[0] : (sal.lastUpdated ? sal.lastUpdated.split('T')[0] : new Date().toISOString().split('T')[0]);
+              const newSalaryExp: sqlite.Expense = {
+                id: expId,
+                userId: user.id,
+                businessId: user.businessId,
+                createdBy: user.id,
+                title: `Staff Salary - ${staff?.name || 'Employee'} (${sal.month})`,
+                amount: netAmount,
+                category: 'Staff Salaries',
+                date: pDate,
+                synced: 0,
+                lastUpdated: sal.lastUpdated || new Date().toISOString(),
+                deleted: 0
+              };
+              await sqlite.upsertExpense(newSalaryExp);
+              dbExpenses.push(newSalaryExp);
+            }
+          }
+        }
+      } catch (salErr) {
+        console.warn('[DatabaseContext] Auto-sync salary expenses error:', salErr);
+      }
       
       setProducts(dbProducts);
       setInvoices(dbInvoices);
@@ -700,8 +734,31 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     await sqlite.upsertSalaryPayment(newPayment);
     
     const staff = staffList.find(s => s.id === staffId);
-    await logActivity(`Logged salary payment for "${staff?.name || 'Employee'}" for month ${month} (Total: PKR ${(amount + bonus - deduction).toFixed(2)})`);
+    const staffName = staff?.name || 'Employee';
+    const netSalary = Math.max(0, amount + bonus - deduction);
+
+    // Auto-record salary payment into Expenses under 'Staff Salaries' category
+    if (netSalary > 0) {
+      const salaryExpenseId = 'exp_' + paymentId;
+      const salaryExpense: sqlite.Expense = {
+        id: salaryExpenseId,
+        userId: user.id,
+        businessId: user.businessId,
+        createdBy: user.id,
+        title: `Staff Salary - ${staffName} (${month})`,
+        amount: netSalary,
+        category: 'Staff Salaries',
+        date: now.split('T')[0],
+        synced: 0,
+        lastUpdated: now,
+        deleted: 0
+      };
+      await sqlite.upsertExpense(salaryExpense);
+    }
+
+    await logActivity(`Logged salary payment for "${staffName}" for month ${month} (Total: PKR ${netSalary.toFixed(2)})`);
     await refreshData();
+    triggerSync().catch(err => console.warn('[DatabaseContext] triggerSync after salary payment failed:', err));
   };
 
   return (

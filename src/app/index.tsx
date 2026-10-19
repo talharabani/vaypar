@@ -274,6 +274,7 @@ export default function DashboardScreen() {
     let grossTodaySales = 0;
     let todayInvoicesCount = 0;
     let todayRefunds = 0;
+    let todayExpenses = 0;
 
     invoices.forEach(inv => {
       if (inv.createdAt.startsWith(todayStr)) {
@@ -288,16 +289,26 @@ export default function DashboardScreen() {
       }
     });
 
+    (expenses || []).forEach(exp => {
+      const expDate = exp.date ? exp.date.split('T')[0] : (exp.lastUpdated ? exp.lastUpdated.split('T')[0] : '');
+      if (expDate === todayStr && !exp.deleted) {
+        todayExpenses += Number(exp.amount) || 0;
+      }
+    });
+
     const todaySales = Math.max(0, grossTodaySales - todayRefunds);
+    const todayNetCash = todaySales - todayExpenses;
 
     return {
       grossTodaySales,
       todayRefunds,
+      todayExpenses,
       todaySales,
+      todayNetCash,
       todayInvoicesCount,
       totalProducts: products.length,
     };
-  }, [invoices, products, returnsExchanges]);
+  }, [invoices, products, returnsExchanges, expenses]);
 
   // Filter invoices for today
   const todayInvoices = useMemo(() => {
@@ -789,15 +800,33 @@ export default function DashboardScreen() {
               flexDirection: 'row',
               alignItems: 'center',
               gap: 4,
-              backgroundColor: todayStats.todaySales > 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(108, 114, 127, 0.1)',
+              backgroundColor: todayStats.todayExpenses > 0
+                ? (todayStats.todayNetCash >= 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)')
+                : (todayStats.todaySales > 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(108, 114, 127, 0.1)'),
               alignSelf: 'flex-start',
               paddingHorizontal: 7,
               paddingVertical: 2,
               borderRadius: 10,
             }}>
-              <Ionicons name={todayStats.todaySales > 0 ? "trending-up" : "wallet-outline"} size={11} color={todayStats.todaySales > 0 ? "#22C55E" : "#6C727F"} />
-              <Text style={{ color: todayStats.todaySales > 0 ? '#22C55E' : '#6C727F', fontSize: 10, fontWeight: '700' }}>
-                {todayStats.todaySales > 0 ? `${todayStats.todaySales.toLocaleString('en-IN')} Today` : '0 Today'}
+              <Ionicons 
+                name={todayStats.todayExpenses > 0 
+                  ? (todayStats.todayNetCash >= 0 ? "trending-up" : "trending-down") 
+                  : (todayStats.todaySales > 0 ? "trending-up" : "wallet-outline")} 
+                size={11} 
+                color={todayStats.todayExpenses > 0 
+                  ? (todayStats.todayNetCash >= 0 ? "#22C55E" : "#EF4444") 
+                  : (todayStats.todaySales > 0 ? "#22C55E" : "#6C727F")} 
+              />
+              <Text style={{ 
+                color: todayStats.todayExpenses > 0 
+                  ? (todayStats.todayNetCash >= 0 ? '#22C55E' : '#EF4444') 
+                  : (todayStats.todaySales > 0 ? '#22C55E' : '#6C727F'), 
+                fontSize: 10, 
+                fontWeight: '700' 
+              }}>
+                {todayStats.todayExpenses > 0 
+                  ? `Net: PKR ${todayStats.todayNetCash.toLocaleString('en-IN')} Today` 
+                  : (todayStats.todaySales > 0 ? `${todayStats.todaySales.toLocaleString('en-IN')} Today` : '0 Today')}
               </Text>
             </View>
           </Card>
@@ -1941,7 +1970,7 @@ export default function DashboardScreen() {
               <View>
                 <Text style={[styles.modalHeading, { color: theme.text }]}>{"Today's Sales Invoices"}</Text>
                 <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]}>
-                  Total Revenue: {todayStats.todaySales.toLocaleString('en-IN')}
+                  Sales: PKR {todayStats.todaySales.toLocaleString('en-IN')}{todayStats.todayExpenses > 0 ? ` • Expenses: -PKR ${todayStats.todayExpenses.toLocaleString('en-IN')} • Net: PKR ${todayStats.todayNetCash.toLocaleString('en-IN')}` : ''}
                 </Text>
               </View>
               <TouchableOpacity onPress={() => setShowTodayInvoices(false)} style={styles.closeBtn}>

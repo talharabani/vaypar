@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -149,7 +149,7 @@ export default function RestaurantSalaryScreen() {
         numDeduction,
         payNotes.trim()
       );
-      Alert.alert('Success', `Salary logged for ${selectedStaff.name}`);
+      Alert.alert('Success', `Salary of PKR ${(numAmount + numBonus - numDeduction).toLocaleString('en-IN')} logged for ${selectedStaff.name} and added to Expenses & Cashflow.`);
       const updatedHistory = await getStaffSalaryPayments(selectedStaff.id);
       setSalaryHistory(updatedHistory);
       setPayModalVisible(false);
