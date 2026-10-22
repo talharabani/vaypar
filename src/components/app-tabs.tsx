@@ -63,7 +63,7 @@ const TAB_CONFIG: Record<NavTab, {
   tailor:     { name: 'tailor',          title: 'Orders',         label: 'Orders',      icon: 'cut-outline',              iconFocused: 'cut',              hideFromRoles: ['kitchen','cook'] },
   gym:        { name: 'gym',             title: 'Members',        label: 'Members',     icon: 'barbell-outline',          iconFocused: 'barbell',          hideFromRoles: ['kitchen','cook'] },
   salon:      { name: 'salon',           title: 'Appointments',   label: 'Salon',       icon: 'calendar-outline',         iconFocused: 'calendar',         hideFromRoles: ['kitchen','cook'] },
-  crm:        { name: 'crm',             title: 'CRM',            label: 'CRM',         icon: 'people-circle-outline',    iconFocused: 'people-circle',    hideFromRoles: ['kitchen','cook'] },
+  crm:        { name: 'crm',             title: 'Customers',      label: 'Customers',   icon: 'people-circle-outline',    iconFocused: 'people-circle',    hideFromRoles: ['kitchen','cook'] },
   queue:      { name: 'queue/index',     title: 'Queue',          label: 'Queue',       icon: 'people-outline',           iconFocused: 'people',           hideFromRoles: ['kitchen','cook'] },
   warranty:   { name: 'warranty/index',  title: 'Warranty',       label: 'Warranty',    icon: 'shield-checkmark-outline', iconFocused: 'shield-checkmark', hideFromRoles: ['kitchen','cook'] },
   returns:    { name: 'returns',          title: 'Exchange & Refund', label: 'Exchange & Refund', icon: 'repeat-outline',        iconFocused: 'repeat',           hideFromRoles: ['kitchen','cook'] },

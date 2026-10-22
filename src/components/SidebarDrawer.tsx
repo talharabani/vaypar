@@ -39,7 +39,7 @@ export function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) {
           { label: 'Kitchen Queue', icon: 'flame-outline', route: '/restaurant' },
           { label: 'Customer Queue', icon: 'people-outline', route: '/queue' },
           { label: 'POS Orders', icon: 'receipt-outline', route: '/bills' },
-          { label: 'Customer CRM', icon: 'people-outline', route: '/crm' },
+          { label: 'Customers', icon: 'people-outline', route: '/crm' },
           { label: 'Sales Reports', icon: 'bar-chart-outline', route: '/activity' },
         ];
       case 'beauty_salon':
@@ -133,7 +133,7 @@ export function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) {
           { label: 'Custom Services', icon: 'sparkles-outline', route: '/services-pos' },
           { label: 'Exchange & Refund', icon: 'repeat-outline', route: '/returns' },
           { label: 'Expenses Tracker', icon: 'wallet-outline', route: '/expenses' },
-          { label: 'Customer CRM', icon: 'people-circle-outline', route: '/crm' },
+          { label: 'Customers', icon: 'people-circle-outline', route: '/crm' },
           { label: 'Operating Reports', icon: 'bar-chart-outline', route: '/activity' },
         ];
     }

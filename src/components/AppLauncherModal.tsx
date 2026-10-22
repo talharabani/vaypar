@@ -135,7 +135,7 @@ export const BUSINESS_MODULES: BusinessModule[] = [
   },
   {
     id: 'crm',
-    title: 'Customer CRM Directory',
+    title: 'Customers Directory',
     subtitle: 'Customer database, lifetime purchases & debt profiles',
     route: '/crm',
     icon: 'people-circle',
