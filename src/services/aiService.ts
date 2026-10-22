@@ -228,6 +228,11 @@ export async function clearAllAIConversations(businessId: string): Promise<void>
   await db.runAsync('DELETE FROM ai_conversations WHERE businessId = ?', [businessId]);
 }
 
+export function safeFormatNumber(val: any): string {
+  if (val === null || val === undefined || isNaN(Number(val))) return '0';
+  return Math.round(Number(val)).toLocaleString();
+}
+
 /**
  * Gathers rich real-time context strictly for the active business
  */
@@ -246,28 +251,28 @@ export async function getBusinessAIContext(businessId: string, user: Partial<Use
   const outOfStockItems: BusinessAIContextData['outOfStockItems'] = [];
   const marginList: BusinessAIContextData['highProfitMarginProducts'] = [];
 
-  products.forEach((p) => {
-    const qty = p.quantity || 0;
-    const threshold = p.lowStockThreshold || 5;
-    const cost = p.purchasePrice || 0;
-    const price = p.price || 0;
+  (products || []).forEach((p) => {
+    const qty = Number(p.quantity) || 0;
+    const threshold = Number(p.lowStockThreshold) || 5;
+    const cost = Number(p.purchasePrice) || 0;
+    const price = Number(p.price) || 0;
 
     totalStockUnits += qty;
     inventoryValuation += qty * (cost > 0 ? cost : price);
 
     if (qty <= 0) {
-      outOfStockItems.push({ name: p.name, price });
+      outOfStockItems.push({ name: p.name || 'Unnamed Product', price });
     } else if (qty <= threshold) {
-      lowStockItems.push({ name: p.name, quantity: qty, threshold, price });
+      lowStockItems.push({ name: p.name || 'Unnamed Product', quantity: qty, threshold, price });
     }
 
     if (price > 0 && cost > 0 && price >= cost) {
       const margin = ((price - cost) / price) * 100;
       marginList.push({
-        name: p.name,
+        name: p.name || 'Unnamed Product',
         price,
         purchasePrice: cost,
-        marginPercent: Math.round(margin),
+        marginPercent: Math.round(margin) || 0,
       });
     }
   });
@@ -281,47 +286,57 @@ export async function getBusinessAIContext(businessId: string, user: Partial<Use
     [businessId]
   );
 
-  const totalInvoicesCount = invoices.length;
-  const totalSalesRevenue = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+  const totalInvoicesCount = (invoices || []).length;
+  const totalSalesRevenue = (invoices || []).reduce((sum, inv) => sum + (Number(inv.total) || 0), 0);
 
   // Today sales
   const todayStr = new Date().toISOString().split('T')[0];
-  const recentSalesToday = invoices
+  const recentSalesToday = (invoices || [])
     .filter((inv) => (inv.createdAt || '').startsWith(todayStr))
-    .reduce((sum, inv) => sum + (inv.total || 0), 0);
+    .reduce((sum, inv) => sum + (Number(inv.total) || 0), 0);
 
   // Top selling products aggregation
-  const itemRows = await db.getAllAsync<{ productName: string; quantity: number; total: number }>(
-    `SELECT ii.productName, SUM(ii.quantity) as quantity, SUM(ii.total) as total
-     FROM invoice_items ii
-     JOIN invoices i ON ii.invoiceId = i.id
-     WHERE i.businessId = ? AND i.deleted = 0
-     GROUP BY ii.productName
-     ORDER BY quantity DESC
-     LIMIT 10`,
-    [businessId]
-  );
+  let topSellingProducts: BusinessAIContextData['topSellingProducts'] = [];
+  try {
+    const itemRows = await db.getAllAsync<{ productName: string; quantity: number; total: number }>(
+      `SELECT ii.productName, SUM(ii.quantity) as quantity, SUM(ii.total) as total
+       FROM invoice_items ii
+       JOIN invoices i ON ii.invoiceId = i.id
+       WHERE i.businessId = ? AND i.deleted = 0
+       GROUP BY ii.productName
+       ORDER BY quantity DESC
+       LIMIT 10`,
+      [businessId]
+    );
 
-  const topSellingProducts = itemRows.map((r) => ({
-    name: r.productName,
-    totalQtySold: r.quantity,
-    totalRevenue: r.total,
-  }));
+    topSellingProducts = (itemRows || []).map((r) => ({
+      name: r.productName || 'Unnamed Item',
+      totalQtySold: Number(r.quantity) || 0,
+      totalRevenue: Number(r.total) || 0,
+    }));
+  } catch (itemErr) {
+    console.warn('[Vaypar AI] Could not query topSellingProducts:', itemErr);
+  }
 
   // 3. Udhar / Credit Accounts
-  const creditRows = await db.getAllAsync<{ balance: number }>(
-    'SELECT balance FROM credit_accounts WHERE businessId = ?',
-    [businessId]
-  );
-  const pendingUdharBalance = creditRows.reduce((sum, c) => sum + (c.balance || 0), 0);
+  let pendingUdharBalance = 0;
+  try {
+    const creditRows = await db.getAllAsync<{ balance: number }>(
+      'SELECT balance FROM credit_accounts WHERE businessId = ?',
+      [businessId]
+    );
+    pendingUdharBalance = (creditRows || []).reduce((sum, c) => sum + (Number(c.balance) || 0), 0);
+  } catch (creditErr) {
+    console.warn('[Vaypar AI] Could not query credit_accounts:', creditErr);
+  }
 
-  const catMeta = getCategoryById(user.businessCategory);
+  const catMeta = getCategoryById(user?.businessCategory);
 
   return {
-    businessName: user.businessName || user.name || 'My Business',
-    businessCategory: user.businessCategory || 'general',
-    categoryLabel: catMeta.label,
-    totalProductsCount: products.length,
+    businessName: user?.businessName || user?.name || 'My Business',
+    businessCategory: user?.businessCategory || 'general',
+    categoryLabel: catMeta?.label || 'General Store',
+    totalProductsCount: (products || []).length,
     totalStockUnits,
     inventoryValuation,
     lowStockItems,
@@ -339,34 +354,34 @@ export async function getBusinessAIContext(businessId: string, user: Partial<Use
  * Builds the comprehensive multi-business system prompt
  */
 export function buildAISystemPrompt(context: BusinessAIContextData): string {
-  const lowStockSummary = context.lowStockItems.length > 0
-    ? context.lowStockItems.map((i) => `• ${i.name}: ${i.quantity} left (alert threshold: ${i.threshold})`).join('\n')
+  const lowStockSummary = (context.lowStockItems || []).length > 0
+    ? context.lowStockItems.map((i) => `• ${i.name}: ${safeFormatNumber(i.quantity)} left (alert threshold: ${safeFormatNumber(i.threshold)})`).join('\n')
     : 'None (All stock is healthy!)';
 
-  const outOfStockSummary = context.outOfStockItems.length > 0
-    ? context.outOfStockItems.map((i) => `• ${i.name} (PKR ${i.price})`).join('\n')
+  const outOfStockSummary = (context.outOfStockItems || []).length > 0
+    ? context.outOfStockItems.map((i) => `• ${i.name} (PKR ${safeFormatNumber(i.price)})`).join('\n')
     : 'None';
 
-  const topSalesSummary = context.topSellingProducts.length > 0
-    ? context.topSellingProducts.map((i, idx) => `${idx + 1}. ${i.name} — ${i.totalQtySold} sold (PKR ${i.totalRevenue.toLocaleString()})`).join('\n')
+  const topSalesSummary = (context.topSellingProducts || []).length > 0
+    ? context.topSellingProducts.map((i, idx) => `${idx + 1}. ${i.name} — ${safeFormatNumber(i.totalQtySold)} sold (PKR ${safeFormatNumber(i.totalRevenue)})`).join('\n')
     : 'No sales records logged yet.';
 
-  const marginSummary = context.highProfitMarginProducts.length > 0
-    ? context.highProfitMarginProducts.map((i) => `• ${i.name}: ${i.marginPercent}% margin (Cost: PKR ${i.purchasePrice} → Price: PKR ${i.price})`).join('\n')
+  const marginSummary = (context.highProfitMarginProducts || []).length > 0
+    ? context.highProfitMarginProducts.map((i) => `• ${i.name}: ${safeFormatNumber(i.marginPercent)}% margin (Cost: PKR ${safeFormatNumber(i.purchasePrice)} → Price: PKR ${safeFormatNumber(i.price)})`).join('\n')
     : 'Cost prices not yet entered for margin analysis.';
 
-  return `You are Vaypar AI, an elite, highly intelligent executive AI assistant and business co-pilot specifically designed for "${context.businessName}".
-Business Category: ${context.categoryLabel} (${context.businessCategory}).
+  return `You are Vaypar AI, an elite, highly intelligent executive AI assistant and business co-pilot specifically designed for "${context.businessName || 'My Business'}".
+Business Category: ${context.categoryLabel || 'General'} (${context.businessCategory || 'general'}).
 
 ==================== LIVE BUSINESS CONTEXT ====================
-• Business Name: ${context.businessName}
-• Category: ${context.categoryLabel}
-• Total Catalog Items: ${context.totalProductsCount} products
-• Total Units in Inventory: ${context.totalStockUnits} items
-• Estimated Inventory Value: PKR ${Math.round(context.inventoryValuation).toLocaleString()}
-• Today's Sales Revenue: PKR ${Math.round(context.recentSalesToday).toLocaleString()}
-• All-Time Total Sales Revenue: PKR ${Math.round(context.totalSalesRevenue).toLocaleString()} across ${context.totalInvoicesCount} invoices
-• Pending Customer Udhar / Credit: PKR ${Math.round(context.pendingUdharBalance).toLocaleString()}
+• Business Name: ${context.businessName || 'My Business'}
+• Category: ${context.categoryLabel || 'General'}
+• Total Catalog Items: ${safeFormatNumber(context.totalProductsCount)} products
+• Total Units in Inventory: ${safeFormatNumber(context.totalStockUnits)} items
+• Estimated Inventory Value: PKR ${safeFormatNumber(context.inventoryValuation)}
+• Today's Sales Revenue: PKR ${safeFormatNumber(context.recentSalesToday)}
+• All-Time Total Sales Revenue: PKR ${safeFormatNumber(context.totalSalesRevenue)} across ${safeFormatNumber(context.totalInvoicesCount)} invoices
+• Pending Customer Udhar / Credit: PKR ${safeFormatNumber(context.pendingUdharBalance)}
 
 LOW STOCK PRODUCTS:
 ${lowStockSummary}
@@ -394,7 +409,7 @@ ${marginSummary}
 6. Multi-Business: Vaypar supports 30+ business industries (Restaurants, Electric Stores, Pharmacies, Gyms, Salons, Tailors, Solar, etc.).
 
 ==================== STRICT RULES ====================
-1. STRICT ISOLATION: You only know and represent "${context.businessName}". Never reference or confuse data from any other business.
+1. STRICT ISOLATION: You only know and represent "${context.businessName || 'My Business'}". Never reference or confuse data from any other business.
 2. ACCURACY: When asked about stock, low stock, profits, or sales, quote the EXACT product names and numbers from the LIVE BUSINESS CONTEXT above. Do not invent products.
 3. TONE & LANGUAGE: Friendly, concise, professional, and knowledgeable. Respond in the language used by the user (English, Urdu, or Roman Urdu).
 4. FORMATTING: Use markdown bold, bullet points, and neat paragraphs so it's pleasant to read on mobile and desktop screens.`;
@@ -409,42 +424,42 @@ export function generateOfflineAIResponse(userMessage: string, context: Business
 
   // 1. Stock / Inventory inquiry
   if (q.includes('stock') || q.includes('low') || q.includes('kam') || q.includes('maal') || q.includes('inventory') || q.includes('item') || q.includes('product')) {
-    let out = `📦 **Inventory & Stock Report for ${context.businessName}:**\n\n`;
-    out += `• **Total Catalog Products:** ${context.totalProductsCount} items\n`;
-    out += `• **Total Stock Units:** ${context.totalStockUnits} units in stock\n`;
-    out += `• **Estimated Stock Value:** PKR ${Math.round(context.inventoryValuation).toLocaleString()}\n\n`;
+    let out = `📦 **Inventory & Stock Report for ${context.businessName || 'My Business'}:**\n\n`;
+    out += `• **Total Catalog Products:** ${safeFormatNumber(context.totalProductsCount)} items\n`;
+    out += `• **Total Stock Units:** ${safeFormatNumber(context.totalStockUnits)} units in stock\n`;
+    out += `• **Estimated Stock Value:** PKR ${safeFormatNumber(context.inventoryValuation)}\n\n`;
 
-    if (context.outOfStockItems.length > 0) {
+    if ((context.outOfStockItems || []).length > 0) {
       out += `🚫 **Out of Stock (${context.outOfStockItems.length} items):**\n`;
       context.outOfStockItems.slice(0, 8).forEach((i) => {
-        out += `• ${i.name} — PKR ${i.price.toLocaleString()}\n`;
+        out += `• ${i.name} — PKR ${safeFormatNumber(i.price)}\n`;
       });
       out += '\n';
     }
 
-    if (context.lowStockItems.length > 0) {
+    if ((context.lowStockItems || []).length > 0) {
       out += `⚠️ **Low Stock Alert (${context.lowStockItems.length} items):**\n`;
       context.lowStockItems.slice(0, 8).forEach((i) => {
-        out += `• ${i.name}: ${i.quantity} left (alert threshold: ${i.threshold})\n`;
+        out += `• ${i.name}: ${safeFormatNumber(i.quantity)} left (alert threshold: ${safeFormatNumber(i.threshold)})\n`;
       });
-    } else if (context.outOfStockItems.length === 0) {
+    } else if ((context.outOfStockItems || []).length === 0) {
       out += `✅ Tamam stock bilkul healthy hai! Koi item low stock ya out of stock nahi hai.`;
     }
     return out;
   }
 
   // 2. Sales / Revenue inquiry
-  if (q.includes('sale') || q.includes('kamai') || q.includes('bikri') || q.includes('revenue') || q.includes('order') || q.includes('bill') || q.includes('aaj') || q.includes('total')) {
-    let out = `💰 **Sales & Revenue Report for ${context.businessName}:**\n\n`;
-    out += `• **Aaj Ki Total Sales:** PKR ${Math.round(context.recentSalesToday).toLocaleString()}\n`;
-    out += `• **All-Time Total Revenue:** PKR ${Math.round(context.totalSalesRevenue).toLocaleString()}\n`;
-    out += `• **Total Invoices / Orders:** ${context.totalInvoicesCount} orders\n`;
-    out += `• **Pending Udhar (Customer Balances):** PKR ${Math.round(context.pendingUdharBalance).toLocaleString()}\n\n`;
+  if (q.includes('sale') || q.includes('kamai') || q.includes('bikri') || q.includes('revenue') || q.includes('order') || q.includes('bill') || q.includes('aaj') || q.includes('total') || q.includes('overview') || q.includes('business')) {
+    let out = `💰 **Sales & Revenue Report for ${context.businessName || 'My Business'}:**\n\n`;
+    out += `• **Aaj Ki Total Sales:** PKR ${safeFormatNumber(context.recentSalesToday)}\n`;
+    out += `• **All-Time Total Revenue:** PKR ${safeFormatNumber(context.totalSalesRevenue)}\n`;
+    out += `• **Total Invoices / Orders:** ${safeFormatNumber(context.totalInvoicesCount)} orders\n`;
+    out += `• **Pending Udhar (Customer Balances):** PKR ${safeFormatNumber(context.pendingUdharBalance)}\n\n`;
 
-    if (context.topSellingProducts.length > 0) {
+    if ((context.topSellingProducts || []).length > 0) {
       out += `🔥 **Top Selling Items:**\n`;
       context.topSellingProducts.slice(0, 5).forEach((p, idx) => {
-        out += `${idx + 1}. ${p.name} — ${p.totalQtySold} sold (PKR ${p.totalRevenue.toLocaleString()})\n`;
+        out += `${idx + 1}. ${p.name} — ${safeFormatNumber(p.totalQtySold)} sold (PKR ${safeFormatNumber(p.totalRevenue)})\n`;
       });
     }
     return out;
@@ -452,19 +467,19 @@ export function generateOfflineAIResponse(userMessage: string, context: Business
 
   // 3. Profit / Margins inquiry
   if (q.includes('profit') || q.includes('margin') || q.includes('munafa') || q.includes('faida') || q.includes('bachat')) {
-    if (context.highProfitMarginProducts.length === 0) {
+    if ((context.highProfitMarginProducts || []).length === 0) {
       return `💡 **Profit Margin Analysis:**\nAapne abhi products ki purchase/cost prices enter nahi ki hain. Products section mein purchase price daalne par yahan automatically highest profit items show honge.`;
     }
-    let out = `📈 **Highest Profit Margin Products (${context.businessName}):**\n\n`;
+    let out = `📈 **Highest Profit Margin Products (${context.businessName || 'My Business'}):**\n\n`;
     context.highProfitMarginProducts.slice(0, 7).forEach((p, idx) => {
-      out += `${idx + 1}. **${p.name}** — ${p.marginPercent}% Margin (Cost: PKR ${p.purchasePrice} → Sale: PKR ${p.price})\n`;
+      out += `${idx + 1}. **${p.name}** — ${safeFormatNumber(p.marginPercent)}% Margin (Cost: PKR ${safeFormatNumber(p.purchasePrice)} → Sale: PKR ${safeFormatNumber(p.price)})\n`;
     });
     return out;
   }
 
   // 4. Udhar / Credit inquiry
   if (q.includes('udhar') || q.includes('khata') || q.includes('credit') || q.includes('dena') || q.includes('lena') || q.includes('wapsi')) {
-    return `📋 **Udhar / Khata Summary for ${context.businessName}:**\n\n• **Customer Pending Udhar:** PKR ${Math.round(context.pendingUdharBalance).toLocaleString()}\n\nAap "Udhar Khata" screen mein ja kar har customer ka hisab dekh sakte hain, payment receive kar sakte hain, aur one-click WhatsApp reminder bhej sakte hain.`;
+    return `📋 **Udhar / Khata Summary for ${context.businessName || 'My Business'}:**\n\n• **Customer Pending Udhar:** PKR ${safeFormatNumber(context.pendingUdharBalance)}\n\nAap "Udhar Khata" screen mein ja kar har customer ka hisab dekh sakte hain, payment receive kar sakte hain, aur one-click WhatsApp reminder bhej sakte hain.`;
   }
 
   // 5. POS / Printers / Slips inquiry

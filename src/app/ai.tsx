@@ -33,6 +33,7 @@ import {
   saveActiveGroqKey,
   saveAIModel,
   saveAIMessage,
+  safeFormatNumber,
   sendChatMessageToGroq,
   SUPPORTED_AI_MODELS,
   SupportedAIModel,
@@ -573,18 +574,18 @@ export default function VayparAIScreen() {
                   <Text style={[styles.statLabel, { color: theme.textMuted }]}>Total Products</Text>
                 </View>
                 <View style={[styles.statBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
-                  <Text style={[styles.statValue, { color: '#D97706' }]}>{contextData?.lowStockItems.length || 0}</Text>
+                  <Text style={[styles.statValue, { color: '#D97706' }]}>{contextData?.lowStockItems?.length || 0}</Text>
                   <Text style={[styles.statLabel, { color: theme.textMuted }]}>Low Stock Alert</Text>
                 </View>
                 <View style={[styles.statBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
                   <Text style={[styles.statValue, { color: '#16A34A' }]}>
-                    PKR {Math.round(contextData?.recentSalesToday || 0).toLocaleString()}
+                    PKR {safeFormatNumber(contextData?.recentSalesToday)}
                   </Text>
                   <Text style={[styles.statLabel, { color: theme.textMuted }]}>Today Sales</Text>
                 </View>
                 <View style={[styles.statBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
                   <Text style={[styles.statValue, { color: '#2563EB' }]}>
-                    PKR {Math.round(contextData?.totalSalesRevenue || 0).toLocaleString()}
+                    PKR {safeFormatNumber(contextData?.totalSalesRevenue)}
                   </Text>
                   <Text style={[styles.statLabel, { color: theme.textMuted }]}>All-Time Revenue</Text>
                 </View>
@@ -594,7 +595,7 @@ export default function VayparAIScreen() {
               {(contextData?.topSellingProducts || []).map((p, idx) => (
                 <View key={idx} style={[styles.insightRow, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
                   <Text style={{ fontWeight: '700', color: theme.text }}>{idx + 1}. {p.name}</Text>
-                  <Text style={{ color: theme.primary, fontWeight: '700' }}>{p.totalQtySold} sold · PKR {p.totalRevenue.toLocaleString()}</Text>
+                  <Text style={{ color: theme.primary, fontWeight: '700' }}>{safeFormatNumber(p.totalQtySold)} sold · PKR {safeFormatNumber(p.totalRevenue)}</Text>
                 </View>
               ))}
 
@@ -602,7 +603,7 @@ export default function VayparAIScreen() {
               {(contextData?.highProfitMarginProducts || []).map((p, idx) => (
                 <View key={idx} style={[styles.insightRow, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
                   <Text style={{ fontWeight: '600', color: theme.text }}>{p.name}</Text>
-                  <Text style={{ color: '#16A34A', fontWeight: '800' }}>{p.marginPercent}% Margin (Cost: {p.purchasePrice} → Sale: {p.price})</Text>
+                  <Text style={{ color: '#16A34A', fontWeight: '800' }}>{safeFormatNumber(p.marginPercent)}% Margin (Cost: {safeFormatNumber(p.purchasePrice)} → Sale: {safeFormatNumber(p.price)})</Text>
                 </View>
               ))}
             </ScrollView>
