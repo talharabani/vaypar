@@ -40,12 +40,12 @@ import {
 } from '../services/aiService';
 
 const URDU_QUICK_PROMPTS = [
-  { label: '📊 Aaj Ki Sale', prompt: 'Aaj ki total sale aur revenue kitna hua hai?' },
-  { label: '⚠️ Kam Stock', prompt: 'Konsay products low stock ya out of stock hain?' },
-  { label: '📋 Udhar Status', prompt: 'Customers ka pending udhar / khata balance kitna hai?' },
-  { label: '🔥 Top Items', prompt: 'Sab se zyada bikne walay products kon se hain?' },
-  { label: '📈 Highest Profit', prompt: 'Highest profit margin walay items kon se hain?' },
-  { label: '🖨️ POS & Slips', prompt: 'Thermal printer aur invoice settings kaise kaam karti hain?' },
+  { icon: 'trending-up-outline', label: 'Aaj Ki Sale', prompt: 'Aaj ki total sale aur revenue kitna hua hai?' },
+  { icon: 'warning-outline', label: 'Kam Stock', prompt: 'Konsay products low stock ya out of stock hain?' },
+  { icon: 'wallet-outline', label: 'Udhar Status', prompt: 'Customers ka pending udhar / khata balance kitna hai?' },
+  { icon: 'flame-outline', label: 'Top Items', prompt: 'Sab se zyada bikne walay products kon se hain?' },
+  { icon: 'cash-outline', label: 'Highest Profit', prompt: 'Highest profit margin walay items kon se hain?' },
+  { icon: 'receipt-outline', label: 'POS & Slips', prompt: 'Thermal printer aur invoice settings kaise kaam karti hain?' },
 ];
 
 interface QuickCard {
@@ -337,7 +337,7 @@ export default function VayparAIScreen() {
             currentConversation.id,
             businessId,
             'assistant',
-            `⚠️ **Notice:**\n${errMsg}`
+            `**Notice:**\n${errMsg}`
           );
           setMessages((prev) => [...prev, errAssistantMsg]);
         } catch (_) {}
@@ -843,16 +843,18 @@ export default function VayparAIScreen() {
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 8, paddingBottom: 16 }}
-                  style={{ width: '100%', marginBottom: 12 }}
+                  contentContainerStyle={{ gap: 8, alignItems: 'center', paddingBottom: 6 }}
+                  style={{ width: '100%', marginBottom: 16, flexGrow: 0 }}
                 >
                   {URDU_QUICK_PROMPTS.map((item, idx) => (
                     <TouchableOpacity
                       key={idx}
                       onPress={() => handleSendMessage(item.prompt)}
                       style={[styles.quickPromptChip, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}
+                      activeOpacity={0.75}
                     >
-                      <Text style={{ fontSize: 12, fontWeight: '600', color: theme.text }}>
+                      <Ionicons name={item.icon as any} size={14} color={theme.primary} />
+                      <Text style={{ fontSize: 12.5, fontWeight: '600', color: theme.text }}>
                         {item.label}
                       </Text>
                     </TouchableOpacity>
@@ -950,7 +952,7 @@ export default function VayparAIScreen() {
               >
                 {messages.map((m) => {
                   const isUser = m.role === 'user';
-                  const isNotice = m.content.startsWith('⚠️');
+                  const isNotice = m.content.startsWith('**Notice:**') || m.content.startsWith('Notice:');
                   return (
                     <View
                       key={m.id}
@@ -1047,16 +1049,18 @@ export default function VayparAIScreen() {
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 8, gap: 8 }}
-                style={{ backgroundColor: theme.backgroundElement, borderTopWidth: 1, borderTopColor: theme.border }}
+                contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 8, gap: 8, alignItems: 'center' }}
+                style={{ backgroundColor: theme.backgroundElement, borderTopWidth: 1, borderTopColor: theme.border, flexGrow: 0 }}
               >
                 {URDU_QUICK_PROMPTS.map((item, idx) => (
                   <TouchableOpacity
                     key={idx}
                     onPress={() => handleSendMessage(item.prompt)}
                     style={[styles.quickPromptChip, { backgroundColor: theme.background, borderColor: theme.border }]}
+                    activeOpacity={0.75}
                   >
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary }}>
+                    <Ionicons name={item.icon as any} size={13} color={theme.primary} />
+                    <Text style={{ fontSize: 11.5, fontWeight: '600', color: theme.textSecondary }}>
                       {item.label}
                     </Text>
                   </TouchableOpacity>
@@ -1680,10 +1684,15 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   quickPromptChip: {
-    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
     paddingVertical: 7,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
+    alignSelf: 'flex-start',
+    height: 36,
   },
   modalOverlay: {
     flex: 1,
