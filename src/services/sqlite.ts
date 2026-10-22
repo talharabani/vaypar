@@ -878,7 +878,7 @@ export async function getNextOrderNumber(businessId: string, date: Date = new Da
      WHERE businessId = ? 
        AND (id LIKE ? OR id LIKE ?) 
      ORDER BY rowid DESC`,
-    [`${prefix}%`, `inv_${prefix}%`]
+    [businessId, `${prefix}%`, `inv_${prefix}%`]
   );
 
   let maxSeq = -1;

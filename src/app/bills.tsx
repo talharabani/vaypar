@@ -1680,7 +1680,7 @@ export default function BillsScreen() {
             </View>
 
             <Button
-              title={billingPaymentType === 'credit' ? 'Issue & Charge to Customer Credit' : 'Save & Issue Invoice'}
+              title={billingPaymentType === 'credit' ? 'Issue Slip (Credit Sale)' : 'Issue Slip'}
               variant={billingPaymentType === 'credit' ? 'danger' : 'primary'}
               size="large"
               onPress={handleSaveInvoice}
