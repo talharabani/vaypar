@@ -177,6 +177,38 @@ export function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) {
             {/* Recent Activity chip strip */}
             <RecentChipStrip maxItems={6} onNavigate={onClose} />
 
+            {/* Vaypar AI Assistant Featured Item */}
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#0D5C3A15',
+                borderWidth: 1,
+                borderColor: '#0D5C3A35',
+                paddingVertical: 9,
+                paddingHorizontal: 12,
+                borderRadius: 10,
+                marginTop: 6,
+                marginBottom: 12,
+                gap: 10,
+              }}
+              onPress={() => handleNavigate('/ai')}
+              activeOpacity={0.75}
+            >
+              <View style={{
+                width: 28, height: 28, borderRadius: 8,
+                backgroundColor: '#0D5C3A',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Ionicons name="sparkles" size={15} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: '#0D5C3A' }}>Vaypar AI</Text>
+                <Text style={{ fontSize: 10.5, color: '#64748B' }}>Smart Business Co-Pilot</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={14} color="#0D5C3A" />
+            </TouchableOpacity>
+
             <Text style={[styles.sectionTitle, { color: '#8A9E94' }] as any}>
               MENU
             </Text>

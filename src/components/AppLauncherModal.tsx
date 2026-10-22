@@ -32,6 +32,17 @@ export interface BusinessModule {
 }
 
 export const BUSINESS_MODULES: BusinessModule[] = [
+  // ─── AI Co-Pilot ───
+  {
+    id: 'ai',
+    title: 'Vaypar AI Co-Pilot',
+    subtitle: 'Ask stock levels, top sales, profit margins & POS settings',
+    route: '/ai',
+    icon: 'sparkles',
+    color: '#8B5CF6',
+    category: 'commerce',
+    badge: 'AI ASSISTANT',
+  },
   // ─── Core Commerce ───
   {
     id: 'dashboard',
