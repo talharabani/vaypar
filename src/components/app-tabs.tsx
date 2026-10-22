@@ -158,8 +158,72 @@ function SidebarNavItems({
     );
   };
 
+  const pathname = usePathname();
+  const isAIActive = pathname === '/ai';
+
   return (
     <>
+      {/* ── Vaypar AI Featured Sidebar Item ── */}
+      <Pressable
+        onPress={() => onNavigate('/ai')}
+        style={({ hovered }: any) => [{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          borderRadius: 10,
+          marginBottom: 12,
+          backgroundColor: isAIActive
+            ? 'rgba(197, 168, 128, 0.18)'
+            : hovered
+              ? 'rgba(197, 168, 128, 0.12)'
+              : 'rgba(197, 168, 128, 0.08)',
+          borderWidth: 1,
+          borderColor: isAIActive ? '#C5A880' : 'rgba(197, 168, 128, 0.3)',
+          position: 'relative',
+        } as any]}
+      >
+        {isAIActive && (
+          <View style={{
+            position: 'absolute',
+            left: 0,
+            top: 6,
+            bottom: 6,
+            width: 3.5,
+            backgroundColor: '#C5A880',
+            borderTopRightRadius: 3,
+            borderBottomRightRadius: 3,
+          }} />
+        )}
+        <View style={{
+          width: 24, height: 24, borderRadius: 6,
+          backgroundColor: '#C5A880',
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Ionicons name="sparkles" size={13} color="#1A1A1A" />
+        </View>
+        <Text style={{
+          color: isAIActive ? '#C5A880' : '#FAF7F2',
+          fontWeight: isAIActive ? '700' : '600',
+          fontSize: 13.5,
+          letterSpacing: -0.1,
+          flex: 1,
+        }}>
+          Vaypar AI
+        </Text>
+        <View style={{
+          backgroundColor: 'rgba(197, 168, 128, 0.25)',
+          paddingHorizontal: 6,
+          paddingVertical: 2,
+          borderRadius: 6,
+        }}>
+          <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#C5A880' }}>
+            AI
+          </Text>
+        </View>
+      </Pressable>
+
       {/* MENU Section */}
       <View nativeID="tour-nav-menu" testID="tour-nav-menu">
         <Text style={{
