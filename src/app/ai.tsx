@@ -227,7 +227,14 @@ export default function VayparAIScreen() {
       // 6. Refresh recent conversations list
       loadConversations();
     } catch (err: any) {
-      Alert.alert('Vaypar AI Error', err.message || 'Failed to get AI response.');
+      const errMsg = err?.message || 'Failed to get AI response. Please try again.';
+      Alert.alert('Vaypar AI Error', errMsg);
+      if (currentConversation) {
+        try {
+          const errAssistantMsg = await saveAIMessage(currentConversation.id, businessId, 'assistant', `⚠️ **AI Service Notice:**\n${errMsg}`);
+          setMessages((prev) => [...prev, errAssistantMsg]);
+        } catch (_) {}
+      }
     } finally {
       setIsLoading(false);
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
