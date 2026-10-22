@@ -268,6 +268,75 @@ export default function DashboardScreen() {
     };
   }, [invoices, expenses, returnsExchanges]);
 
+  // Dashboard Timeframe Filter (Daily, Weekly, Monthly, Annually)
+  type Timeframe = 'daily' | 'weekly' | 'monthly' | 'annually';
+  const [timeframe, setTimeframe] = useState<Timeframe>('daily');
+
+  // Filtered financial metrics and invoices according to active timeframe
+  const filteredData = useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const weekStart = new Date(now.getTime() - 7 * 86400000).getTime();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const yearStart = new Date(now.getFullYear(), 0, 1).getTime();
+
+    const isMatch = (isoDate?: string) => {
+      if (!isoDate) return false;
+      const t = new Date(isoDate).getTime();
+      if (isNaN(t)) return false;
+      if (timeframe === 'daily') return t >= todayStart;
+      if (timeframe === 'weekly') return t >= weekStart;
+      if (timeframe === 'monthly') return t >= monthStart;
+      if (timeframe === 'annually') return t >= yearStart;
+      return true;
+    };
+
+    const periodInvoices = (invoices || []).filter(inv => isMatch(inv.createdAt));
+    const periodExpenses = (expenses || []).filter(exp => {
+      if (exp.deleted) return false;
+      const d = exp.date || exp.lastUpdated;
+      return isMatch(d);
+    });
+    const periodReturns = (returnsExchanges || []).filter(ret => isMatch(ret.createdAt));
+
+    let grossSales = 0;
+    periodInvoices.forEach(inv => { grossSales += inv.total || 0; });
+
+    let totalExpenses = 0;
+    periodExpenses.forEach(exp => { totalExpenses += Number(exp.amount) || 0; });
+
+    let totalRefunds = 0;
+    periodReturns.forEach(ret => { totalRefunds += Number(ret.refundAmount) || 0; });
+
+    const netSales = Math.max(0, grossSales - totalRefunds);
+    const netProfit = netSales - totalExpenses;
+    const orderCount = periodInvoices.length;
+    const avgOrderValue = orderCount > 0 ? netSales / orderCount : 0;
+
+    const label =
+      timeframe === 'daily'
+        ? 'Today'
+        : timeframe === 'weekly'
+        ? 'This Week'
+        : timeframe === 'monthly'
+        ? 'This Month'
+        : 'This Year';
+
+    return {
+      invoices: periodInvoices,
+      expenses: periodExpenses,
+      returns: periodReturns,
+      grossSales,
+      totalExpenses,
+      totalRefunds,
+      netSales,
+      netProfit,
+      orderCount,
+      avgOrderValue,
+      label,
+    };
+  }, [invoices, expenses, returnsExchanges, timeframe]);
+
   // Today's POS statistics
   const todayStats = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0];
@@ -699,30 +768,29 @@ export default function DashboardScreen() {
       );
     }
 
-    // Default: Retail, Grocery, General Business (Real Live Database Metrics)
-    const totalOrdersCount = invoices.length;
-    const totalSalesAmount = metrics.totalSales;
+    // Default: Retail, Grocery, General Business (Real Live Database Metrics filtered by timeframe)
+    const totalOrdersCount = filteredData.orderCount;
+    const totalSalesAmount = filteredData.netSales;
     const totalProductsCount = products.length;
     const totalStockUnits = products.reduce((sum, p) => sum + (p.quantity || 0), 0);
     const lowStockCount = lowStockProducts.length;
 
     return (
       <View style={[styles.kpiContainer, isMobile && { flexWrap: 'wrap' }]}>
-        {/* Card 1: Total Orders (Dark Obsidian Card) */}
-        <TouchableOpacity style={{ flex: isMobile ? undefined : 1, width: isMobile ? '48%' : undefined, minWidth: isMobile ? 140 : 160 }} onPress={() => setShowTodayInvoices(true)} activeOpacity={0.85}>
-          <View style={{
-            backgroundColor: '#18191E',
-            borderRadius: 18,
-            padding: 16,
-            justifyContent: 'space-between',
-            minHeight: 128,
-            borderWidth: 1,
-            borderColor: 'rgba(255, 255, 255, 0.08)',
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.15,
-            shadowRadius: 8,
-          }}>
+        {/* Card 1: Total Orders (Dark Obsidian Card with Hover) */}
+        <View style={{ flex: isMobile ? undefined : 1, width: isMobile ? '48%' : undefined, minWidth: isMobile ? 140 : 160 }}>
+          <Card
+            hoverable
+            onPress={() => setShowTodayInvoices(true)}
+            style={{
+              backgroundColor: '#18191E',
+              borderColor: 'rgba(255, 255, 255, 0.12)',
+              borderRadius: 18,
+              padding: 16,
+              justifyContent: 'space-between',
+              minHeight: 128,
+            }}
+          >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View style={{
                 width: 32, height: 32, borderRadius: 16,
@@ -742,7 +810,7 @@ export default function DashboardScreen() {
             
             <View style={{ marginVertical: 4 }}>
               <Text style={{ color: '#9AA1B0', fontSize: 11.5, fontWeight: '600' }}>
-                Total Orders
+                Orders ({filteredData.label})
               </Text>
               <Text style={{ color: '#FFFFFF', fontSize: 24, fontWeight: '800', marginTop: 2 }}>
                 {totalOrdersCount.toLocaleString('en-US')}
@@ -753,23 +821,27 @@ export default function DashboardScreen() {
               flexDirection: 'row',
               alignItems: 'center',
               gap: 4,
-              backgroundColor: todayStats.todayInvoicesCount > 0 ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+              backgroundColor: totalOrdersCount > 0 ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.08)',
               alignSelf: 'flex-start',
               paddingHorizontal: 7,
               paddingVertical: 2,
               borderRadius: 10,
             }}>
-              <Ionicons name={todayStats.todayInvoicesCount > 0 ? "trending-up" : "calendar-outline"} size={11} color={todayStats.todayInvoicesCount > 0 ? "#22C55E" : "#9AA1B0"} />
-              <Text style={{ color: todayStats.todayInvoicesCount > 0 ? '#22C55E' : '#9AA1B0', fontSize: 10, fontWeight: '700' }}>
-                {todayStats.todayInvoicesCount > 0 ? `+${todayStats.todayInvoicesCount} Today` : '0 Today'}
+              <Ionicons name={totalOrdersCount > 0 ? "trending-up" : "calendar-outline"} size={11} color={totalOrdersCount > 0 ? "#22C55E" : "#9AA1B0"} />
+              <Text style={{ color: totalOrdersCount > 0 ? '#22C55E' : '#9AA1B0', fontSize: 10, fontWeight: '700' }}>
+                {totalOrdersCount > 0 ? `Avg: PKR ${filteredData.avgOrderValue.toFixed(0)}` : `0 in ${filteredData.label}`}
               </Text>
             </View>
-          </View>
-        </TouchableOpacity>
+          </Card>
+        </View>
 
-        {/* Card 2: Total Revenue / Sales (White Card) */}
-        <TouchableOpacity style={{ flex: isMobile ? undefined : 1, width: isMobile ? '48%' : undefined, minWidth: isMobile ? 140 : 160 }} onPress={() => router.push('/revenue' as any)} activeOpacity={0.7}>
-          <Card style={[styles.kpiCard, { backgroundColor: '#FFFFFF', borderColor: '#EAECEF', borderWidth: 1, borderRadius: 18, minHeight: 128, justifyContent: 'space-between', padding: 16 }]}>
+        {/* Card 2: Total Revenue / Sales (White Card with Hover) */}
+        <View style={{ flex: isMobile ? undefined : 1, width: isMobile ? '48%' : undefined, minWidth: isMobile ? 140 : 160 }}>
+          <Card
+            hoverable
+            onPress={() => router.push('/revenue' as any)}
+            style={[styles.kpiCard, { backgroundColor: '#FFFFFF', borderColor: '#EAECEF', borderWidth: 1, borderRadius: 18, minHeight: 128, justifyContent: 'space-between', padding: 16 }]}
+          >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
               <View style={{
                 width: 32, height: 32, borderRadius: 16,
@@ -789,7 +861,7 @@ export default function DashboardScreen() {
             
             <View style={{ marginVertical: 4 }}>
               <Text style={{ color: '#6C727F', fontSize: 11.5, fontWeight: '600' }}>
-                Total Revenue
+                Revenue ({filteredData.label})
               </Text>
               <Text style={{ color: '#111318', fontSize: 24, fontWeight: '800', marginTop: 2 }} numberOfLines={1}>
                 {totalSalesAmount.toLocaleString('en-IN')}
@@ -800,41 +872,45 @@ export default function DashboardScreen() {
               flexDirection: 'row',
               alignItems: 'center',
               gap: 4,
-              backgroundColor: todayStats.todayExpenses > 0
-                ? (todayStats.todayNetCash >= 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)')
-                : (todayStats.todaySales > 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(108, 114, 127, 0.1)'),
+              backgroundColor: filteredData.totalExpenses > 0
+                ? (filteredData.netProfit >= 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)')
+                : (totalSalesAmount > 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(108, 114, 127, 0.1)'),
               alignSelf: 'flex-start',
               paddingHorizontal: 7,
               paddingVertical: 2,
               borderRadius: 10,
             }}>
               <Ionicons 
-                name={todayStats.todayExpenses > 0 
-                  ? (todayStats.todayNetCash >= 0 ? "trending-up" : "trending-down") 
-                  : (todayStats.todaySales > 0 ? "trending-up" : "wallet-outline")} 
+                name={filteredData.totalExpenses > 0 
+                  ? (filteredData.netProfit >= 0 ? "trending-up" : "trending-down") 
+                  : (totalSalesAmount > 0 ? "trending-up" : "wallet-outline")} 
                 size={11} 
-                color={todayStats.todayExpenses > 0 
-                  ? (todayStats.todayNetCash >= 0 ? "#22C55E" : "#EF4444") 
-                  : (todayStats.todaySales > 0 ? "#22C55E" : "#6C727F")} 
+                color={filteredData.totalExpenses > 0 
+                  ? (filteredData.netProfit >= 0 ? "#22C55E" : "#EF4444") 
+                  : (totalSalesAmount > 0 ? "#22C55E" : "#6C727F")} 
               />
               <Text style={{ 
-                color: todayStats.todayExpenses > 0 
-                  ? (todayStats.todayNetCash >= 0 ? '#22C55E' : '#EF4444') 
-                  : (todayStats.todaySales > 0 ? '#22C55E' : '#6C727F'), 
+                color: filteredData.totalExpenses > 0 
+                  ? (filteredData.netProfit >= 0 ? '#22C55E' : '#EF4444') 
+                  : (totalSalesAmount > 0 ? '#22C55E' : '#6C727F'), 
                 fontSize: 10, 
                 fontWeight: '700' 
               }}>
-                {todayStats.todayExpenses > 0 
-                  ? `Net: PKR ${todayStats.todayNetCash.toLocaleString('en-IN')} Today` 
-                  : (todayStats.todaySales > 0 ? `${todayStats.todaySales.toLocaleString('en-IN')} Today` : '0 Today')}
+                {filteredData.totalExpenses > 0 
+                  ? `Net: PKR ${filteredData.netProfit.toLocaleString('en-IN')}` 
+                  : (totalSalesAmount > 0 ? `Gross: PKR ${filteredData.grossSales.toLocaleString('en-IN')}` : `0 in ${filteredData.label}`)}
               </Text>
             </View>
           </Card>
-        </TouchableOpacity>
+        </View>
 
-        {/* Card: Customer Credit Receivables */}
-        <TouchableOpacity style={{ flex: isMobile ? undefined : 1, width: isMobile ? '48%' : undefined, minWidth: isMobile ? 140 : 160 }} onPress={() => router.push('/udhar' as any)} activeOpacity={0.7}>
-          <Card style={[styles.kpiCard, { backgroundColor: '#FFFFFF', borderColor: '#EAECEF', borderWidth: 1, borderRadius: 18, minHeight: 128, justifyContent: 'space-between', padding: 16 }]}>
+        {/* Card 3: Customer Credit Receivables with Hover */}
+        <View style={{ flex: isMobile ? undefined : 1, width: isMobile ? '48%' : undefined, minWidth: isMobile ? 140 : 160 }}>
+          <Card
+            hoverable
+            onPress={() => router.push('/udhar' as any)}
+            style={[styles.kpiCard, { backgroundColor: '#FFFFFF', borderColor: '#EAECEF', borderWidth: 1, borderRadius: 18, minHeight: 128, justifyContent: 'space-between', padding: 16 }]}
+          >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
               <View style={{
                 width: 32, height: 32, borderRadius: 16,
@@ -873,15 +949,19 @@ export default function DashboardScreen() {
             }}>
               <Ionicons name={totalCreditOutstanding > 0 ? "alert-circle-outline" : "checkmark-circle-outline"} size={11} color={totalCreditOutstanding > 0 ? "#DC2626" : "#6C727F"} />
               <Text style={{ color: totalCreditOutstanding > 0 ? '#DC2626' : '#6C727F', fontSize: 10, fontWeight: '700' }}>
-                {totalCreditOutstanding > 0 ? `${pendingCreditCount} Due` : 'Cleared'}
+                {totalCreditOutstanding > 0 ? `${pendingCreditCount} Pending` : 'All Cleared'}
               </Text>
             </View>
           </Card>
-        </TouchableOpacity>
+        </View>
 
-        {/* Card 3: Products in Catalog (White Card) */}
-        <TouchableOpacity style={{ flex: isMobile ? undefined : 1, width: isMobile ? '48%' : undefined, minWidth: isMobile ? 140 : 160 }} onPress={() => router.push('/products' as any)} activeOpacity={0.7}>
-          <Card style={[styles.kpiCard, { backgroundColor: '#FFFFFF', borderColor: '#EAECEF', borderWidth: 1, borderRadius: 18, minHeight: 128, justifyContent: 'space-between', padding: 16 }]}>
+        {/* Card 4: Products in Catalog with Hover */}
+        <View style={{ flex: isMobile ? undefined : 1, width: isMobile ? '48%' : undefined, minWidth: isMobile ? 140 : 160 }}>
+          <Card
+            hoverable
+            onPress={() => router.push('/products' as any)}
+            style={[styles.kpiCard, { backgroundColor: '#FFFFFF', borderColor: '#EAECEF', borderWidth: 1, borderRadius: 18, minHeight: 128, justifyContent: 'space-between', padding: 16 }]}
+          >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
               <View style={{
                 width: 32, height: 32, borderRadius: 16,
@@ -915,69 +995,19 @@ export default function DashboardScreen() {
               flexDirection: 'row',
               alignItems: 'center',
               gap: 4,
-              backgroundColor: totalProductsCount > 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(108, 114, 127, 0.1)',
-              alignSelf: 'flex-start',
-              paddingHorizontal: 7,
-              paddingVertical: 2,
-              borderRadius: 10,
-            }}>
-              <Ionicons name="pricetag-outline" size={11} color={totalProductsCount > 0 ? "#22C55E" : "#6C727F"} />
-              <Text style={{ color: totalProductsCount > 0 ? '#22C55E' : '#6C727F', fontSize: 10, fontWeight: '700' }}>
-                {totalProductsCount > 0 ? `${totalProductsCount} in Catalog` : '0 in Catalog'}
-              </Text>
-            </View>
-          </Card>
-        </TouchableOpacity>
-
-        {/* Card 4: Low Stock / Reorder Alerts (White Card) */}
-        <TouchableOpacity style={{ flex: isMobile ? undefined : 1, width: isMobile ? '100%' : undefined, minWidth: isMobile ? 140 : 160 }} onPress={() => router.push('/products' as any)} activeOpacity={0.7}>
-          <Card style={[styles.kpiCard, { backgroundColor: '#FFFFFF', borderColor: '#EAECEF', borderWidth: 1, borderRadius: 18, minHeight: 128, justifyContent: 'space-between', padding: 16 }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-              <View style={{
-                width: 32, height: 32, borderRadius: 16,
-                backgroundColor: lowStockCount > 0 ? '#FEE2E2' : '#DCFCE7',
-                alignItems: 'center', justifyContent: 'center',
-              }}>
-                <Ionicons name={lowStockCount > 0 ? "alert-circle-outline" : "checkmark-circle-outline"} size={16} color={lowStockCount > 0 ? "#DC2626" : "#16A34A"} />
-              </View>
-              <View style={{
-                backgroundColor: lowStockCount > 0 ? '#FEE2E2' : '#DCFCE7',
-                paddingHorizontal: 6,
-                paddingVertical: 2,
-                borderRadius: 8,
-              }}>
-                <Text style={{ fontSize: 9, fontWeight: '800', color: lowStockCount > 0 ? '#DC2626' : '#16A34A' }}>
-                  {lowStockCount > 0 ? `${lowStockCount} Reorder` : 'Healthy'}
-                </Text>
-              </View>
-            </View>
-            
-            <View style={{ marginVertical: 4 }}>
-              <Text style={{ color: '#6C727F', fontSize: 11.5, fontWeight: '600' }}>
-                Low Stock Alerts
-              </Text>
-              <Text style={{ color: lowStockCount > 0 ? '#DC2626' : '#111318', fontSize: 24, fontWeight: '800', marginTop: 2 }}>
-                {lowStockCount.toLocaleString('en-US')}
-              </Text>
-            </View>
-            
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 4,
               backgroundColor: lowStockCount > 0 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(34, 197, 94, 0.12)',
               alignSelf: 'flex-start',
               paddingHorizontal: 7,
               paddingVertical: 2,
               borderRadius: 10,
             }}>
-              <Ionicons name={lowStockCount > 0 ? "warning-outline" : "shield-checkmark-outline"} size={11} color={lowStockCount > 0 ? "#DC2626" : "#22C55E"} />
+              <Ionicons name={lowStockCount > 0 ? "alert-circle-outline" : "pricetag-outline"} size={11} color={lowStockCount > 0 ? "#DC2626" : "#22C55E"} />
               <Text style={{ color: lowStockCount > 0 ? '#DC2626' : '#22C55E', fontSize: 10, fontWeight: '700' }}>
-                {lowStockCount > 0 ? `${lowStockCount} Items Need Restock` : 'All Stock Healthy'}
+                {lowStockCount > 0 ? `${lowStockCount} Low Stock` : `${totalProductsCount} in Catalog`}
               </Text>
             </View>
           </Card>
-        </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -1067,7 +1097,10 @@ export default function DashboardScreen() {
       return (
         <View style={styles.feedSection}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>🍽️ Dining Room Tables</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="restaurant-outline" size={16} color={theme.primary} />
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Dining Room Tables</Text>
+            </View>
             <TouchableOpacity onPress={() => router.push('/restaurant' as any)}>
               <Text style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>Open Floor Map →</Text>
             </TouchableOpacity>
@@ -1112,7 +1145,10 @@ export default function DashboardScreen() {
       return (
         <View style={styles.feedSection}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>⚠️ Membership Renewals Due</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="alert-circle-outline" size={16} color={theme.danger} />
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Membership Renewals Due</Text>
+            </View>
             <TouchableOpacity onPress={() => router.push('/gym' as any)}>
               <Text style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>View All →</Text>
             </TouchableOpacity>
@@ -1154,7 +1190,10 @@ export default function DashboardScreen() {
       return (
         <View style={styles.feedSection}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>💅 Today's Salon Schedule</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="sparkles-outline" size={16} color={theme.primary} />
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Today's Salon Schedule</Text>
+            </View>
             <TouchableOpacity onPress={() => router.push('/salon' as any)}>
               <Text style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>Appointment Book →</Text>
             </TouchableOpacity>
@@ -1171,7 +1210,7 @@ export default function DashboardScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.domainRowTitle, { color: theme.text }]}>{apt.customerName}</Text>
                     <Text style={{ fontSize: 11, color: theme.textSecondary }}>
-                      {apt.serviceName} · 🕒 {apt.appointmentTime}
+                      {apt.serviceName} · {apt.appointmentTime}
                     </Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
@@ -1198,7 +1237,10 @@ export default function DashboardScreen() {
       return (
         <View style={styles.feedSection}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>🧵 Active Stitching Pipeline</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="cut-outline" size={16} color={theme.primary} />
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Active Stitching Pipeline</Text>
+            </View>
             <TouchableOpacity onPress={() => router.push('/tailor' as any)}>
               <Text style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>Orders Ledger →</Text>
             </TouchableOpacity>
@@ -1242,7 +1284,10 @@ export default function DashboardScreen() {
       return (
         <View style={styles.feedSection}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>💊 Critical Expiry Radar (&lt;30 Days)</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="medkit-outline" size={16} color={theme.danger} />
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>Critical Expiry Radar (&lt;30 Days)</Text>
+            </View>
             <TouchableOpacity onPress={() => router.push('/pharmacy' as any)}>
               <Text style={{ fontSize: 12, fontWeight: '700', color: theme.danger }}>Manage Batches →</Text>
             </TouchableOpacity>
@@ -1297,40 +1342,118 @@ export default function DashboardScreen() {
       >
         <View style={styles.responsiveContainer}>
 
-          {/* Web Dashboard Title Banner */}
+          {/* Web Dashboard Title Banner & Timeframe Selector */}
           {Platform.OS === 'web' && (
-            <View style={{ marginBottom: 18, marginTop: 4 }}>
-              <Text style={{ fontSize: 26, fontWeight: '800', color: theme.text, letterSpacing: -0.5 }}>
-                Dashboard
-              </Text>
-              <Text style={{ fontSize: 13, color: theme.textSecondary, fontWeight: '500', marginTop: 2 }}>
-                Real-time sales, inventory, and financial overview for {user?.businessName || 'your store'}.
-              </Text>
+            <View style={{ marginBottom: 18, marginTop: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <View>
+                <Text style={{ fontSize: 26, fontWeight: '800', color: theme.text, letterSpacing: -0.5 }}>
+                  Dashboard
+                </Text>
+                <Text style={{ fontSize: 13, color: theme.textSecondary, fontWeight: '500', marginTop: 2 }}>
+                  Real-time sales, inventory, and financial overview ({filteredData.label}) for {user?.businessName || 'your store'}.
+                </Text>
+              </View>
+
+              {/* Timeframe Selector Bar */}
+              <View style={[styles.timeframeBarContainer, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+                {[
+                  { key: 'daily', label: 'Daily (Today)', icon: 'today-outline' },
+                  { key: 'weekly', label: 'Weekly (7D)', icon: 'calendar-outline' },
+                  { key: 'monthly', label: 'Monthly (30D)', icon: 'pie-chart-outline' },
+                  { key: 'annually', label: 'Annually (1Y)', icon: 'bar-chart-outline' },
+                ].map((item) => {
+                  const isActive = timeframe === item.key;
+                  return (
+                    <TouchableOpacity
+                      key={item.key}
+                      onPress={() => setTimeframe(item.key as any)}
+                      style={[
+                        styles.timeframeTab,
+                        isActive && { backgroundColor: '#C5A880' },
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name={item.icon as any}
+                        size={13}
+                        color={isActive ? '#16171B' : theme.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.timeframeTabText,
+                          { color: isActive ? '#16171B' : theme.textSecondary, fontWeight: isActive ? '800' : '600' },
+                        ]}
+                      >
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           )}
 
           {/* Mobile Profile & Business Hero banner */}
           {Platform.OS !== 'web' && (
-            <View style={[styles.welcomeContainer, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
-              <TouchableOpacity onPress={() => setDrawerVisible(true)} activeOpacity={0.7}>
-                <BusinessLogo size={46} borderRadius={12} fontSize={18} />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.welcomeSub, { color: theme.textSecondary }]}>
-                  {user?.name || 'Shop Owner'} · {category.group}
-                </Text>
-                <Text style={[styles.welcomeTitle, { color: theme.text }]} numberOfLines={1}>
-                  {user?.businessName || 'My Business'}
-                </Text>
+            <>
+              <View style={[styles.welcomeContainer, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+                <TouchableOpacity onPress={() => setDrawerVisible(true)} activeOpacity={0.7}>
+                  <BusinessLogo size={46} borderRadius={12} fontSize={18} />
+                </TouchableOpacity>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.welcomeSub, { color: theme.textSecondary }]}>
+                    {user?.name || 'Shop Owner'} · {category.group}
+                  </Text>
+                  <Text style={[styles.welcomeTitle, { color: theme.text }]} numberOfLines={1}>
+                    {user?.businessName || 'My Business'}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.themeToggleBtn, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}
+                  onPress={() => setProfileMenuVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="person-circle-outline" size={18} color={theme.primary} />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={[styles.themeToggleBtn, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}
-                onPress={() => setProfileMenuVisible(true)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="person-circle-outline" size={18} color={theme.primary} />
-              </TouchableOpacity>
-            </View>
+
+              {/* Mobile Timeframe Selector */}
+              <View style={[styles.timeframeBarContainer, { backgroundColor: theme.backgroundElement, borderColor: theme.border, marginBottom: 14 }]}>
+                {[
+                  { key: 'daily', label: 'Daily', icon: 'today-outline' },
+                  { key: 'weekly', label: 'Weekly', icon: 'calendar-outline' },
+                  { key: 'monthly', label: 'Monthly', icon: 'pie-chart-outline' },
+                  { key: 'annually', label: 'Annually', icon: 'bar-chart-outline' },
+                ].map((item) => {
+                  const isActive = timeframe === item.key;
+                  return (
+                    <TouchableOpacity
+                      key={item.key}
+                      onPress={() => setTimeframe(item.key as any)}
+                      style={[
+                        styles.timeframeTab,
+                        isActive && { backgroundColor: '#C5A880' },
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name={item.icon as any}
+                        size={12}
+                        color={isActive ? '#16171B' : theme.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.timeframeTabText,
+                          { color: isActive ? '#16171B' : theme.textSecondary, fontWeight: isActive ? '800' : '600' },
+                        ]}
+                      >
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
           )}
 
           {/* Profile Menu Dropdown */}
@@ -1358,7 +1481,7 @@ export default function DashboardScreen() {
           }}>
             {/* Left: Total Stock Volume vs Consume Rate Chart */}
             <View nativeID="tour-revenue-chart" testID="tour-revenue-chart" style={{ flex: isMobile ? undefined : 1.2 }}>
-              <InteractiveRevenueChart invoices={invoices} expenses={expenses} />
+              <InteractiveRevenueChart invoices={filteredData.invoices} expenses={filteredData.expenses} />
             </View>
 
             {/* Right: Custom Tags & Labels Table Card (Real Products from SQLite Database) */}
@@ -2174,6 +2297,25 @@ const styles = StyleSheet.create({
     maxWidth: 960,
     width: '100%',
     alignSelf: 'center',
+  },
+  timeframeBarContainer: {
+    flexDirection: 'row',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 3,
+    gap: 4,
+    alignSelf: 'flex-start',
+  },
+  timeframeTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 9,
+  },
+  timeframeTabText: {
+    fontSize: 12,
   },
 
   welcomeContainer: {

@@ -718,7 +718,7 @@ function AddTransactionModal({
       const exceeded = newBal - account.creditLimit;
       const msg = `This transaction will exceed the customer's credit limit of ${formatPKR(account.creditLimit)} by ${formatPKR(exceeded)}.\n\nProceed and authorize this debit?`;
       if (Platform.OS === 'web') {
-        const ok = window.confirm(`⚠️ Credit Limit Warning\n\n${msg}`);
+        const ok = window.confirm(`Credit Limit Warning\n\n${msg}`);
         if (!ok) return;
       }
     }
@@ -1579,7 +1579,7 @@ function CreditDetailModal({
             </Text>
             {account.customerAddress ? (
               <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 3 }}>
-                📍 {account.customerAddress}
+                {account.customerAddress}
               </Text>
             ) : null}
           </View>
@@ -2185,7 +2185,7 @@ export default function UdharScreen() {
 
                       {acc.customerAddress ? (
                         <Text style={{ color: theme.textSecondary + '95', fontSize: 11, marginTop: 1 }} numberOfLines={1}>
-                          📍 {acc.customerAddress}
+                          {acc.customerAddress}
                         </Text>
                       ) : null}
 
@@ -2296,12 +2296,12 @@ export default function UdharScreen() {
                         </Text>
                         {debtor.customerPhone ? (
                           <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 1 }}>
-                            📞 {debtor.customerPhone}
+                            {debtor.customerPhone}
                           </Text>
                         ) : null}
                         {debtor.customerAddress ? (
                           <Text style={{ fontSize: 11, color: theme.textSecondary + '95', marginTop: 1 }} numberOfLines={1}>
-                            📍 {debtor.customerAddress}
+                            {debtor.customerAddress}
                           </Text>
                         ) : null}
                       </View>

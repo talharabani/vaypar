@@ -11,6 +11,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View
 } from 'react-native';
 import { Button } from '../components/Button';
@@ -33,6 +34,8 @@ import { formatCustomerPhoneForWhatsApp } from '../utils/invoiceShare';
 
 export default function BillsScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isMobile = width < 768;
   const { 
     products, 
     invoices, 
@@ -88,6 +91,11 @@ export default function BillsScreen() {
   // Service Charges State
   const [serviceChargeInput, setServiceChargeInput] = useState('');
   const [serviceChargeType, setServiceChargeType] = useState<'amount' | 'percentage'>('amount');
+
+  // Manual Additional Product State (for ad-hoc items not in catalog)
+  const [customItemName, setCustomItemName] = useState('');
+  const [customItemPrice, setCustomItemPrice] = useState('');
+  const [customItemQty, setCustomItemQty] = useState('1');
 
   // Return & Exchange states
   const [returnsSegment, setReturnsSegment] = useState<'process' | 'history'>('process');
@@ -717,6 +725,36 @@ export default function BillsScreen() {
     setSelectedQty('1');
   };
 
+  // Add Manual Additional Product directly to bill
+  const handleAddCustomItem = () => {
+    const trimmedName = customItemName.trim();
+    const priceNum = parseFloat(customItemPrice.replace(/,/g, ''));
+    const qtyNum = parseInt(customItemQty, 10) || 1;
+
+    if (!trimmedName) {
+      Alert.alert('Item Name Required', 'Please enter a name for the custom additional item.');
+      return;
+    }
+    if (isNaN(priceNum) || priceNum < 0) {
+      Alert.alert('Invalid Price', 'Please enter a valid price for this item.');
+      return;
+    }
+
+    const newItem = {
+      productId: 'custom_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+      productName: trimmedName,
+      price: priceNum,
+      purchasePrice: 0,
+      quantity: qtyNum > 0 ? qtyNum : 1,
+      total: (qtyNum > 0 ? qtyNum : 1) * priceNum,
+    };
+
+    setInvoiceItems([...invoiceItems, newItem]);
+    setCustomItemName('');
+    setCustomItemPrice('');
+    setCustomItemQty('1');
+  };
+
   // Save the invoice to SQLite database
   const handleSaveInvoice = async () => {
     if (invoiceItems.length === 0) {
@@ -755,6 +793,9 @@ export default function BillsScreen() {
 
     // Final stock validation check
     for (const item of invoiceItems) {
+      if (item.productId && item.productId.startsWith('custom_')) {
+        continue; // Manual custom items do not require stock deduction from database
+      }
       const dbProduct = products.find(p => p.id === item.productId);
       if (!dbProduct) {
         Alert.alert('Product Error', `Product "${item.productName}" was not found in database.`);
@@ -886,6 +927,9 @@ export default function BillsScreen() {
         setCustomerPhone('');
         setDiscountInput('0');
         setServiceChargeInput('');
+        setCustomItemName('');
+        setCustomItemPrice('');
+        setCustomItemQty('1');
         setBillingPaymentType('cash');
         
         // Navigate to History Tab
@@ -908,7 +952,7 @@ export default function BillsScreen() {
       const msg = `Customer credit limit is PKR ${creditLimitWarning.limit.toLocaleString('en-IN')}.\nCurrent balance: PKR ${creditLimitWarning.currentBal.toLocaleString('en-IN')}.\nThis bill: PKR ${invoiceTotals.total.toLocaleString('en-IN')}.\nTotal after bill: PKR ${creditLimitWarning.projectedBal.toLocaleString('en-IN')}.\n\nLimit will be exceeded by PKR ${creditLimitWarning.exceededBy.toLocaleString('en-IN')}. Do you want to authorize this credit sale?`;
       
       if (Platform.OS === 'web') {
-        const confirmed = window.confirm(`⚠️ CREDIT LIMIT EXCEEDED!\n\n${msg}`);
+        const confirmed = window.confirm(`CREDIT LIMIT EXCEEDED!\n\n${msg}`);
         if (confirmed) {
           executeInvoiceCreation();
         }
@@ -916,7 +960,7 @@ export default function BillsScreen() {
       }
 
       Alert.alert(
-        '⚠️ Credit Limit Exceeded',
+        'Credit Limit Exceeded',
         msg,
         [
           { text: 'Cancel / Review', style: 'cancel' },
@@ -1280,7 +1324,7 @@ export default function BillsScreen() {
             {frequentCustomers.length > 0 && (
               <View style={{ marginBottom: 12 }}>
                 <Text style={{ fontSize: 10.5, fontWeight: '800', color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
-                  ⚡ Quick Regular Customers (1-Tap Select)
+                  Quick Regular Customers (1-Tap Select)
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingBottom: 2 }}>
                   {frequentCustomers.map((cust, cIdx) => {
@@ -1423,7 +1467,7 @@ export default function BillsScreen() {
                             {item.name}
                           </Text>
                           <Text style={{ fontSize: 10.5, color: theme.primary, fontWeight: '600' }}>
-                            📞 {item.phone}
+                            {item.phone}
                           </Text>
                         </View>
                         <View style={{ alignItems: 'flex-end' }}>
@@ -1483,7 +1527,7 @@ export default function BillsScreen() {
                             {item.name}
                           </Text>
                           <Text style={{ fontSize: 10.5, color: theme.textSecondary }}>
-                            📞 {item.phone || 'No phone'}
+                            {item.phone || 'No phone'}
                           </Text>
                         </View>
                         <View style={{ alignItems: 'flex-end' }}>
@@ -1538,7 +1582,7 @@ export default function BillsScreen() {
                 {creditLimitWarning && (
                   <View style={{ marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#EF444430' }}>
                     <Text style={{ fontSize: 11, fontWeight: '800', color: '#DC2626' }}>
-                      ⚠️ Credit limit exceeded by PKR {creditLimitWarning.exceededBy.toLocaleString('en-IN')}! Requires confirmation before issuing.
+                      Credit limit exceeded by PKR {creditLimitWarning.exceededBy.toLocaleString('en-IN')}! Requires confirmation before issuing.
                     </Text>
                   </View>
                 )}
@@ -1648,6 +1692,57 @@ export default function BillsScreen() {
                   backgroundColor: theme.backgroundElement,
                 }]}
               />
+            </View>
+
+            {/* ── Additional / Manual Custom Product (Above Service Charges) ── */}
+            <View style={[styles.customItemBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="add-circle-outline" size={15} color={theme.primary} />
+                  <Text style={{ fontSize: 12.5, fontWeight: '800', color: theme.text }}>
+                    Additional Item (Manual Entry)
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 10, color: theme.textSecondary }}>
+                  For items not in catalog
+                </Text>
+              </View>
+
+              <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: 8, alignItems: isMobile ? 'stretch' : 'center' }}>
+                <TextInput
+                  placeholder="Item Name (e.g. Gift Packing, Custom Service)"
+                  placeholderTextColor={theme.textSecondary + '80'}
+                  value={customItemName}
+                  onChangeText={setCustomItemName}
+                  style={[styles.customItemNameInput, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
+                />
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                  <TextInput
+                    placeholder="Price (PKR)"
+                    placeholderTextColor={theme.textSecondary + '80'}
+                    value={customItemPrice}
+                    onChangeText={setCustomItemPrice}
+                    keyboardType="numeric"
+                    style={[styles.customItemPriceInput, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
+                  />
+                  <TextInput
+                    placeholder="Qty"
+                    placeholderTextColor={theme.textSecondary + '80'}
+                    value={customItemQty}
+                    onChangeText={setCustomItemQty}
+                    keyboardType="numeric"
+                    style={[styles.customItemQtyInput, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
+                  />
+                  <TouchableOpacity
+                    onPress={handleAddCustomItem}
+                    style={[styles.customItemAddBtn, { backgroundColor: theme.primary }]}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="add" size={16} color="#FFFFFF" />
+                    <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 11.5 }}>Add</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
 
             {/* Service Charges Input */}
@@ -2070,13 +2165,13 @@ export default function BillsScreen() {
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
                             {cust.phone ? (
                               <Text style={{ fontSize: 13, color: theme.textSecondary }}>
-                                📞 {cust.phone}
+                                {cust.phone}
                               </Text>
                             ) : null}
 
                             {cust.lastVisit ? (
                               <Text style={{ fontSize: 12, color: theme.textSecondary }}>
-                                🕒 Last Visit: {new Date(cust.lastVisit).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                Last Visit: {new Date(cust.lastVisit).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}
                               </Text>
                             ) : null}
                           </View>
@@ -2653,7 +2748,7 @@ export default function BillsScreen() {
                     }}
                   >
                     <Text style={{ fontWeight: '700', fontSize: 12, color: returnCondition === 'resellable' ? theme.success : theme.text }}>
-                      📦 Good / Resellable
+                      Good / Resellable
                     </Text>
                     <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>Restores back to stock</Text>
                   </TouchableOpacity>
@@ -2671,7 +2766,7 @@ export default function BillsScreen() {
                     }}
                   >
                     <Text style={{ fontWeight: '700', fontSize: 12, color: returnCondition === 'damaged' ? theme.danger : theme.text }}>
-                      ⚠️ Defective / Damaged
+                      Defective / Damaged
                     </Text>
                     <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>Does not add to stock</Text>
                   </TouchableOpacity>
@@ -3654,5 +3749,45 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 6,
     borderWidth: 1,
+  },
+  customItemBox: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginVertical: 10,
+  },
+  customItemNameInput: {
+    flex: 1,
+    minHeight: 38,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    fontSize: 12.5,
+  },
+  customItemPriceInput: {
+    width: 95,
+    minHeight: 38,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    fontSize: 12.5,
+  },
+  customItemQtyInput: {
+    width: 55,
+    minHeight: 38,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    textAlign: 'center',
+    fontSize: 12.5,
+  },
+  customItemAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
+    minHeight: 38,
+    borderRadius: 8,
+    justifyContent: 'center',
   },
 });

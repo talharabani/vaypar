@@ -17,9 +17,9 @@ export function Card({ children, style, variant = 'elevated', hoverable = true, 
 
   const getShadow = (pressed: boolean) => {
     if (variant === 'flat') return 'none';
-    if (pressed && onPress) return '0 1px 3px rgba(0,0,0,0.06)';
-    if (hoverable && hovered) return '0 8px 24px rgba(0,0,0,0.06), 0 2px 6px rgba(0,0,0,0.03)';
-    return '0 1px 4px rgba(0,0,0,0.03), 0 1px 2px rgba(0,0,0,0.02)';
+    if (pressed && onPress) return '0 1px 3px rgba(0,0,0,0.08)';
+    if (hoverable && hovered) return '0 14px 28px -4px rgba(0,0,0,0.12), 0 4px 12px -2px rgba(0,0,0,0.06)';
+    return '0 2px 6px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)';
   };
 
   return (
@@ -27,20 +27,20 @@ export function Card({ children, style, variant = 'elevated', hoverable = true, 
       onHoverIn={() => setHovered(true)}
       onHoverOut={() => setHovered(false)}
       onPress={onPress}
-      disabled={!onPress}
       style={({ pressed }: any) => [
         styles.card,
         {
           backgroundColor: theme.backgroundElement,
-          borderColor: '#EAECEF',
+          borderColor: hoverable && hovered ? (theme.primary ? theme.primary + '55' : '#C5A88070') : (theme.border || '#EAECEF'),
           borderWidth: 1,
           borderRadius: 18,
         },
         Platform.select({
           web: {
             boxShadow: getShadow(pressed),
-            transition: 'box-shadow 0.2s ease, transform 0.15s ease, border-color 0.2s ease',
-            transform: pressed && onPress ? 'scale(0.99)' : hoverable && hovered && onPress ? 'translateY(-2px)' : 'none',
+            transition: 'all 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+            transform: pressed && onPress ? 'scale(0.985)' : hoverable && hovered ? 'translateY(-3px)' : 'none',
+            cursor: onPress ? 'pointer' : 'default',
           } as any,
           default: pressed && onPress ? { transform: [{ scale: 0.99 }] } : {},
         }),
