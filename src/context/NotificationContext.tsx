@@ -38,6 +38,8 @@ function mapTypeToToast(type: string): ToastAlert['type'] {
     case 'tailor_dress_delivered':
       return 'success';
     case 'pharmacy_low_stock':
+    case 'product_low_stock':
+    case 'low_stock':
       return 'out_of_stock';
     case 'salon_new_appointment':
       return 'success';
@@ -63,6 +65,9 @@ function getEmojiForType(type: string): string {
       return '👗';
     case 'pharmacy_low_stock':
       return '💊';
+    case 'product_low_stock':
+    case 'low_stock':
+      return '⚠️';
     case 'salon_new_appointment':
       return '📅';
     default:

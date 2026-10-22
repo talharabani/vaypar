@@ -1,5 +1,5 @@
 import { Platform, Linking, Alert } from 'react-native';
-import { Invoice, InvoiceItem, ReturnExchange } from '../services/sqlite';
+import { Invoice, InvoiceItem, ReturnExchange, formatOrderNumber } from '../services/sqlite';
 import { UserSession } from '../store/useAuthStore';
 import { generateInvoiceHTML } from '../services/pdfGenerator';
 
@@ -259,15 +259,17 @@ export async function getWhatsAppInvoiceMessage(
   const formattedTotal = 'PKR ' + invoice.total.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const bizName = business.businessName || 'Our Shop';
   const custName = invoice.customerName?.trim() || 'Valued Customer';
-  const invNumber = invoice.id.replace(/^inv_/i, '').toUpperCase();
+  const orderNumber = formatOrderNumber(invoice.id, invoice.createdAt);
+  const custPhoneLine = invoice.customerPhone ? `👤 *Customer:* ${custName} (${invoice.customerPhone})\n` : `👤 *Customer:* ${custName}\n`;
 
   const message =
     `Assalam-o-Alaikum *${custName}*,\n\n` +
     `Thank you for shopping with us at *${bizName}*! 🙏\n\n` +
-    `🧾 *INVOICE DETAILS*\n` +
+    `🧾 *ORDER / INVOICE DETAILS*\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `🏪 *Business:* ${bizName}\n` +
-    `📋 *Invoice #:* #${invNumber}\n` +
+    `📋 *Order #:* #${orderNumber}\n` +
+    custPhoneLine +
     `📅 *Date:* ${formattedDate}\n` +
     `💰 *Total Bill:* *${formattedTotal}*\n` +
     `💳 *Status:* Paid\n` +
@@ -276,7 +278,8 @@ export async function getWhatsAppInvoiceMessage(
     `👉 ${url}\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `Thank you for your business! JazakAllah Khair.\n` +
-    `*${bizName}*`;
+    `*${bizName}*\n\n` +
+    `_Prepared by Vaypar_`;
 
   const cleanPhone = invoice.customerPhone ? invoice.customerPhone.trim() : '';
   const formattedPhone = formatCustomerPhoneForWhatsApp(cleanPhone);

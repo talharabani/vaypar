@@ -496,3 +496,19 @@ export function getCategoryById(id: BusinessCategoryId | string | undefined): Bu
     BUSINESS_CATEGORIES.find(c => c.id === 'general')!
   );
 }
+
+/** Check whether a business category belongs to Food & Beverage (restaurant, cafe, dhaba, etc.) */
+export function isFoodBusiness(categoryId?: string): boolean {
+  if (!categoryId) return false;
+  const foodCats = [
+    'restaurant',
+    'cafe',
+    'dhaba',
+    'bakery',
+    'sweet_shop',
+    'juice_bar',
+    'coffee_shop'
+  ];
+  return foodCats.includes(categoryId.trim().toLowerCase());
+}
+

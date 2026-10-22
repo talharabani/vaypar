@@ -1,6 +1,6 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { Invoice, InvoiceItem, Expense } from './sqlite';
+import { Invoice, InvoiceItem, Expense, formatOrderNumber } from './sqlite';
 import { UserSession } from '../store/useAuthStore';
 import { Platform, Alert } from 'react-native';
 
@@ -46,6 +46,7 @@ export function generateInvoiceHTML({
   const emailLine = business.email ? `<span>Email: ${business.email}</span>` : '';
 
   const cleanId = invoice.id.replace(/^inv_/i, '').toUpperCase();
+  const orderNumber = formatOrderNumber(invoice.id, invoice.createdAt);
   const isPaid = paymentStatus.toLowerCase().includes('paid');
 
   return `
@@ -54,7 +55,7 @@ export function generateInvoiceHTML({
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-        <title>Invoice #${cleanId} - ${business.businessName || 'Business'}</title>
+        <title>Order #${orderNumber} - ${business.businessName || 'Business'}</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
           
@@ -532,7 +533,7 @@ export function generateInvoiceHTML({
                 <p><span class="bullet">•</span> Customer Account: Active</p>
               </div>
               <div class="meta-invoice-info">
-                <p><strong>Invoice No:</strong> #${cleanId}</p>
+                <p><strong>Order No:</strong> #${orderNumber}</p>
                 <p><strong>Invoice Date:</strong> ${formattedDate}</p>
                 <div><span class="status-badge">${paymentStatus}</span></div>
               </div>
@@ -613,6 +614,9 @@ export function generateInvoiceHTML({
                 ${phoneLine}
                 ${emailLine}
                 ${addressLine}
+              </div>
+              <div style="text-align: center; margin-top: 14px; font-size: 11px; color: #64748B; font-weight: 600; letter-spacing: 0.5px;">
+                Prepared by Vaypar
               </div>
             </div>
 

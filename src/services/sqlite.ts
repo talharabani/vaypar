@@ -828,15 +828,22 @@ export async function upsertProduct(product: Product): Promise<void> {
     ]
   );
 
-  // Trigger low stock warning
+  // Trigger low stock warning (adapts dynamically: Medicine for pharmacy, Product for other businesses)
   if ((product.deleted ?? 0) === 0 && product.quantity <= product.lowStockThreshold) {
     try {
       const { createNotification } = require('./notificationService');
+      const biz = await db.getFirstAsync<{ businessCategory?: string }>(
+        'SELECT businessCategory FROM businesses WHERE id = ?',
+        [product.businessId]
+      );
+      const isPharmacy = biz?.businessCategory === 'pharmacy' || biz?.businessCategory === 'medical_store';
+      const label = isPharmacy ? 'Medicine' : 'Product';
+      const notifType = isPharmacy ? 'pharmacy_low_stock' : 'product_low_stock';
       await createNotification(
         product.businessId,
-        'pharmacy_low_stock',
-        'Medicine Low Stock',
-        `Medicine ${product.name} is running low! (${product.quantity} remaining)`
+        notifType,
+        `${label} Low Stock`,
+        `${label} "${product.name}" is running low! (${product.quantity} remaining)`
       );
     } catch {}
   }
@@ -852,8 +859,57 @@ export async function softDeleteProduct(id: string, userId: string): Promise<voi
 }
 
 // ==========================================
-// INVOICES CRUD
+// INVOICES CRUD & ORDER NUMBER SEQUENCE
 // ==========================================
+
+/**
+ * Generates the next sequential order number for a business in standard format ORD-YYYY-XXXX.
+ * Sequences automatically restart when a new year begins (e.g. #ORD-2026-0000, #ORD-2026-0001; in 2027: #ORD-2027-0000).
+ */
+export async function getNextOrderNumber(businessId: string, date: Date = new Date()): Promise<string> {
+  const db = await getDB();
+  const year = date.getFullYear();
+  const prefix = `ORD-${year}-`;
+
+  const rows = await db.getAllAsync<{ id: string }>(
+    `SELECT id FROM invoices 
+     WHERE businessId = ? 
+       AND (id LIKE ? OR id LIKE ?) 
+     ORDER BY rowid DESC`,
+    [`${prefix}%`, `inv_${prefix}%`]
+  );
+
+  let maxSeq = -1;
+  for (const row of rows) {
+    const clean = row.id.replace(/^inv_/i, '');
+    if (clean.startsWith(prefix)) {
+      const numPart = parseInt(clean.substring(prefix.length), 10);
+      if (!isNaN(numPart) && numPart > maxSeq) {
+        maxSeq = numPart;
+      }
+    }
+  }
+
+  const nextSeq = maxSeq + 1;
+  const seqFormatted = String(nextSeq).padStart(4, '0');
+  return `ORD-${year}-${seqFormatted}`;
+}
+
+/**
+ * Formats any invoice ID into standard clean #ORD-YYYY-XXXX representation
+ */
+export function formatOrderNumber(invoiceId?: string, createdAt?: string): string {
+  if (!invoiceId) return 'ORD-0000-0000';
+  const clean = invoiceId.replace(/^inv_/i, '').toUpperCase();
+  if (clean.startsWith('ORD-')) {
+    return clean;
+  }
+  const year = createdAt ? new Date(createdAt).getFullYear() : new Date().getFullYear();
+  const digits = clean.replace(/[^0-9]/g, '');
+  const seq = (digits.length >= 4 ? digits.slice(-4) : clean.slice(-4)).padStart(4, '0');
+  return `ORD-${year}-${seq}`;
+}
+
 
 export async function getInvoices(businessId: string, includeDeleted = false): Promise<Invoice[]> {
   const db = await getDB();
@@ -918,16 +974,23 @@ export async function createInvoice(invoice: Invoice, items: InvoiceItem[]): Pro
          [item.quantity, now, item.productId]
       );
 
-      // Trigger low stock warning if threshold is breached after sale
+      // Trigger low stock warning if threshold is breached after sale (dynamic for any business)
       const prod = await getProductById(item.productId);
       if (prod && (prod.deleted ?? 0) === 0 && prod.quantity <= prod.lowStockThreshold) {
         try {
           const { createNotification } = require('./notificationService');
+          const biz = await db.getFirstAsync<{ businessCategory?: string }>(
+            'SELECT businessCategory FROM businesses WHERE id = ?',
+            [invoice.businessId]
+          );
+          const isPharmacy = biz?.businessCategory === 'pharmacy' || biz?.businessCategory === 'medical_store';
+          const label = isPharmacy ? 'Medicine' : 'Product';
+          const notifType = isPharmacy ? 'pharmacy_low_stock' : 'product_low_stock';
           await createNotification(
             invoice.businessId,
-            'pharmacy_low_stock',
-            'Medicine Low Stock',
-            `Medicine ${prod.name} has dropped below threshold! Only ${prod.quantity} remaining.`
+            notifType,
+            `${label} Low Stock`,
+            `${label} "${prod.name}" has dropped below threshold! Only ${prod.quantity} remaining.`
           );
         } catch {}
       }

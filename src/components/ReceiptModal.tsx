@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     Alert,
+    Image,
     Linking,
     Modal,
     Platform,
@@ -285,7 +286,7 @@ export function ReceiptModal({ visible, invoice, items, onClose, onExchangeRetur
             <View>
               <Text style={[styles.title, { color: theme.text }]}>POS Terminal Control</Text>
               <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                Invoice ID: #{invoice.id.toUpperCase()}
+                Order No: #{sqlite.formatOrderNumber(invoice.id, invoice.createdAt)}
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} style={[styles.closeBtn, { backgroundColor: theme.backgroundSelected }]}>
@@ -309,6 +310,14 @@ export function ReceiptModal({ visible, invoice, items, onClose, onExchangeRetur
                   <View style={styles.jaggedBorder} />
                   
                   <View style={styles.paperBody}>
+                    {user.logoUri ? (
+                      <View style={{ alignItems: 'center', marginBottom: 10 }}>
+                        <Image
+                          source={{ uri: user.logoUri }}
+                          style={{ width: 68, height: 48, resizeMode: 'contain' }}
+                        />
+                      </View>
+                    ) : null}
                     {renderedReceiptLines}
                   </View>
                   

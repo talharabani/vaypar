@@ -1,7 +1,8 @@
 import { Platform, Alert } from 'react-native';
 import * as Print from 'expo-print';
-import { Invoice, InvoiceItem, ReturnExchange } from './sqlite';
+import { Invoice, InvoiceItem, ReturnExchange, formatOrderNumber } from './sqlite';
 import { UserSession } from '../store/useAuthStore';
+import { isFoodBusiness } from '../constants/businessCategories';
 
 export interface ThermalReceipt {
   plainText: string;
@@ -81,13 +82,15 @@ export function generateThermalReceipt(
   const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
   const timeStr = d.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' });
   const cleanId = invoice.id.replace(/^inv_/i, '').toUpperCase();
-  const billNo = cleanId.substring(0, 6);
-  const tokenNo = (invoice as any).tokenNumber || cleanId.slice(-3) || '27';
+  const orderNumber = formatOrderNumber(invoice.id, invoice.createdAt);
+  const tokenNo = (invoice as any).tokenNumber || orderNumber.slice(-4) || '0000';
+  const tableNo = (invoice as any).tableNumber || (invoice as any).tableId || '';
   const cashier = (invoice as any).cashierName || business.name || 'biller';
   const orderType = (invoice as any).paymentMethod ? (invoice as any).paymentMethod.toUpperCase() : 'COUNTER';
   const customer = invoice.customerName || 'Walk-In';
   const totalQty = items.reduce((sum, it) => sum + (it.quantity || 1), 0);
   const taxId = (business as any).taxNumber || (business as any).ntnNumber || (business as any).gstin || '';
+  const isFoodBiz = isFoodBusiness(business.businessCategory);
 
   // 1. Initialize Printer
   byteArrays.push(COMMANDS.RESET);
@@ -117,15 +120,21 @@ export function generateThermalReceipt(
   // Dividing Line
   addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
 
-  // 4. Customer Name Line
-  addLine(`Name: ${customer}`, COMMANDS.ALIGN_LEFT);
+  // 4. Customer Name & Phone
+  addLine(`Customer: ${customer}`, COMMANDS.ALIGN_LEFT);
+  if (invoice.customerPhone && invoice.customerPhone.trim()) {
+    addLine(`Phone:    ${invoice.customerPhone.trim()}`, COMMANDS.ALIGN_LEFT);
+  }
   addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
 
-  // 5. Metadata (2 columns)
-  addLine(`Date: ${dateStr}     Dine In: ${orderType.substring(0, 8)}`, COMMANDS.ALIGN_LEFT);
-  addLine(`${timeStr}`, COMMANDS.ALIGN_LEFT);
-  addLine(`Cashier: ${cashier.substring(0, 8).padEnd(8, ' ')}  Bill No.: ${billNo}`, COMMANDS.ALIGN_LEFT);
-  addLine(`Token No.: ${tokenNo}`, COMMANDS.ALIGN_LEFT);
+  // 5. Metadata (business-aware: dine-in/tables only for food businesses)
+  addLine(`Date: ${dateStr}  Time: ${timeStr}`, COMMANDS.ALIGN_LEFT);
+  addLine(`Order No: #${orderNumber}`, COMMANDS.ALIGN_LEFT);
+  if (isFoodBiz) {
+    const foodType = tableNo ? `Dine In: Table ${tableNo}` : `Order: ${orderType.substring(0, 10)}`;
+    addLine(`${foodType.padEnd(16, ' ')} Token: ${tokenNo}`, COMMANDS.ALIGN_LEFT);
+  }
+  addLine(`Cashier:  ${cashier.substring(0, 20)}`, COMMANDS.ALIGN_LEFT);
   addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
 
   // 6. Items Table Header
@@ -174,7 +183,8 @@ export function generateThermalReceipt(
   if (taxId) {
     addLine(`Lic / NTN: ${taxId}`, COMMANDS.ALIGN_CENTER);
   }
-  addLine('Thank You, Visit Again.', COMMANDS.ALIGN_CENTER);
+  addLine('Thank You, Visit Again!', COMMANDS.ALIGN_CENTER);
+  addLine('Prepared by Vaypar', COMMANDS.ALIGN_CENTER);
 
   // Feeds and paper cut
   byteArrays.push(COMMANDS.LINE_FEED);
@@ -205,9 +215,9 @@ export function generateThermalSlipHTML(
   const widthMm = is58mm ? '58mm' : '80mm';
   const contentWidthMm = is58mm ? '52mm' : '74mm';
 
-  const cleanId = invoice.id.replace(/^inv_/i, '').toUpperCase();
-  const billNo = cleanId.substring(0, 6);
-  const tokenNo = (invoice as any).tokenNumber || cleanId.slice(-3) || '27';
+  const orderNumber = formatOrderNumber(invoice.id, invoice.createdAt);
+  const tokenNo = (invoice as any).tokenNumber || orderNumber.slice(-4) || '0000';
+  const tableNo = (invoice as any).tableNumber || (invoice as any).tableId || '';
 
   const d = new Date(invoice.createdAt);
   const dateFormatted = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
@@ -216,6 +226,7 @@ export function generateThermalSlipHTML(
   const cashierName = (invoice as any).cashierName || business.name || 'biller';
   const orderType = (invoice as any).paymentMethod ? (invoice as any).paymentMethod.toUpperCase() : 'COUNTER';
   const customerName = invoice.customerName || '';
+  const isFoodBiz = isFoodBusiness(business.businessCategory);
 
   const totalQty = items.reduce((sum, it) => sum + (it.quantity || 1), 0);
   const taxId = (business as any).taxNumber || (business as any).ntnNumber || (business as any).gstin || '';
@@ -234,7 +245,7 @@ export function generateThermalSlipHTML(
     <html>
       <head>
         <meta charset="utf-8" />
-        <title>Receipt - #${cleanId}</title>
+        <title>Receipt - #${orderNumber}</title>
         <style>
           @page {
             size: ${widthMm} auto;
@@ -348,6 +359,11 @@ export function generateThermalSlipHTML(
       </head>
       <body>
         <div class="receipt">
+          ${business.logoUri ? `
+            <div style="text-align: center; margin-bottom: 6px;">
+              <img src="${business.logoUri}" style="max-height: 50px; max-width: 140px; object-fit: contain;" alt="Logo" />
+            </div>
+          ` : ''}
           <!-- Business Header -->
           <div class="store-name">${business.businessName || business.name || 'MY BUSINESS'}</div>
           ${business.address ? `<div class="store-sub">${business.address}</div>` : ''}
@@ -356,25 +372,31 @@ export function generateThermalSlipHTML(
           
           <div class="divider-solid"></div>
 
-          <!-- Customer Name -->
+          <!-- Customer Name & Phone -->
           <div class="customer-line">
-            Name: ${customerName || 'Walk-In'}
+            <div><strong>Customer:</strong> ${customerName || 'Walk-In'}</div>
+            ${invoice.customerPhone ? `<div style="font-weight: 500; font-size: ${is58mm ? '10px' : '11px'}; margin-top: 1px;"><strong>Phone:</strong> ${invoice.customerPhone}</div>` : ''}
           </div>
 
           <div class="divider-solid"></div>
 
-          <!-- 2-Column Metadata -->
+          <!-- 2-Column Metadata (business-aware) -->
           <div class="meta-grid">
             <div class="meta-col-left">
               <div>Date: ${dateFormatted}</div>
-              <div>${timeFormatted}</div>
+              <div>Time: ${timeFormatted}</div>
               <div>Cashier: ${cashierName}</div>
-              <div>Token No.: ${tokenNo}</div>
+              ${isFoodBiz ? `<div>Token: ${tokenNo}</div>` : ''}
             </div>
             <div class="meta-col-right">
-              <div>Dine In: ${orderType}</div>
-              <div>&nbsp;</div>
-              <div>Bill No.: ${billNo}</div>
+              <div>Order No:</div>
+              <div style="font-weight: 800; font-size: ${is58mm ? '10px' : '11px'};">#${orderNumber}</div>
+              ${isFoodBiz ? `
+                <div style="margin-top: 2px;">Order: ${orderType}</div>
+                ${tableNo ? `<div>Table: ${tableNo}</div>` : ''}
+              ` : `
+                <div style="margin-top: 2px;">Payment: ${(invoice as any).paymentMethod ? (invoice as any).paymentMethod.toUpperCase() : 'PAID'}</div>
+              `}
             </div>
           </div>
 
@@ -426,7 +448,8 @@ export function generateThermalSlipHTML(
           <!-- Footer -->
           <div class="footer-section">
             ${taxId ? `<div>Lic / NTN: ${taxId}</div>` : ''}
-            <div style="font-weight: 700; margin-top: 2px;">Thank You, Visit Again.</div>
+            <div style="font-weight: 700; margin-top: 2px;">Thank You, Visit Again!</div>
+            <div style="font-size: 10px; color: #555555; margin-top: 5px; font-weight: 600; letter-spacing: 0.5px;">Prepared by Vaypar</div>
           </div>
           <br/>
         </div>
@@ -950,7 +973,8 @@ export function generateReturnExchangeReceipt(
   addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
   if (record.reason) addLine(`Reason: ${record.reason}`, COMMANDS.ALIGN_LEFT);
   if (record.notes) addLine(`Notes: ${record.notes}`, COMMANDS.ALIGN_LEFT);
-  addLine('Thank You, Visit Again.', COMMANDS.ALIGN_CENTER);
+  addLine('Thank You, Visit Again!', COMMANDS.ALIGN_CENTER);
+  addLine('Prepared by Vaypar', COMMANDS.ALIGN_CENTER);
 
   byteArrays.push(COMMANDS.LINE_FEED);
   byteArrays.push(COMMANDS.LINE_FEED);
@@ -1156,7 +1180,8 @@ export function generateReturnExchangeSlipHTML(
 
           <div class="footer-section">
             <div>Exchange & return subject to store policy.</div>
-            <div style="font-weight: 700; margin-top: 2px;">Thank You, Visit Again.</div>
+            <div style="font-weight: 700; margin-top: 2px;">Thank You, Visit Again!</div>
+            <div style="font-size: 10px; color: #555555; margin-top: 5px; font-weight: 600; letter-spacing: 0.5px;">Prepared by Vaypar</div>
           </div>
           <br/>
         </div>

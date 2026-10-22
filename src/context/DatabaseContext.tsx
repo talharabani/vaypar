@@ -358,12 +358,13 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     if (!user) throw new Error('Authentication required');
     
     const now = new Date().toISOString();
-    const invoiceId = 'inv_' + Math.random().toString(36).substring(2, 15);
+    const targetBizId = user.businessId || user.id;
+    const invoiceId = await sqlite.getNextOrderNumber(targetBizId);
     
     const newInvoice: sqlite.Invoice = {
       id: invoiceId,
       userId: user.id,
-      businessId: user.businessId,
+      businessId: targetBizId,
       createdBy: user.id,
       customerName,
       customerPhone,

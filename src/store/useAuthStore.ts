@@ -18,6 +18,7 @@ export interface UserSession {
   businessName: string;
   address: string;
   logoUri: string;
+  businessCategory?: string;
   lastUpdated: string;
 }
 
