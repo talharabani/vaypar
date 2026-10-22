@@ -47,6 +47,8 @@ export interface CreditAccount {
   customerId: string;
   customerName: string;
   customerPhone: string;
+  customerAddress?: string;
+  creditLimit?: number; // max allowed udhar (e.g. Rs 50,000)
   totalDebit: number;   // total amount charged (udhar)
   totalCredit: number;  // total amount paid back
   balance: number;      // totalDebit - totalCredit
@@ -63,6 +65,7 @@ export interface CreditTransaction {
   type: 'debit' | 'credit'; // debit = gave on udhar, credit = received payment
   amount: number;
   description?: string;
+  paymentMethod?: string; // Cash, Bank Transfer, EasyPaisa, JazzCash, Online POS, Cheque
   createdAt: string;
   createdBy: string;
 }
@@ -125,6 +128,7 @@ export interface Invoice {
   discount: number;
   serviceCharges?: number;
   total: number;
+  paymentMethod?: string; // 'cash' | 'credit' | 'card' etc.
   createdAt: string;
   synced?: number;
   lastUpdated: string;
@@ -350,6 +354,7 @@ async function initializeDatabase(db: SQLite.SQLiteDatabase) {
       discount REAL DEFAULT 0,
       serviceCharges REAL DEFAULT 0,
       total REAL DEFAULT 0,
+      paymentMethod TEXT DEFAULT 'cash',
       createdAt TEXT,
       synced INTEGER DEFAULT 0,
       lastUpdated TEXT,
@@ -510,6 +515,9 @@ async function initializeDatabase(db: SQLite.SQLiteDatabase) {
     if (!invoicesInfo.some(col => col.name === 'serviceCharges')) {
       await db.execAsync("ALTER TABLE invoices ADD COLUMN serviceCharges REAL DEFAULT 0;");
     }
+    if (!invoicesInfo.some(col => col.name === 'paymentMethod')) {
+      await db.execAsync("ALTER TABLE invoices ADD COLUMN paymentMethod TEXT DEFAULT 'cash';");
+    }
   } catch (e) { console.error("invoices ALTER error:", e); }
 
   try {
@@ -561,6 +569,8 @@ async function initializeDatabase(db: SQLite.SQLiteDatabase) {
       customerId TEXT,
       customerName TEXT,
       customerPhone TEXT,
+      customerAddress TEXT,
+      creditLimit REAL DEFAULT 0,
       totalDebit REAL DEFAULT 0,
       totalCredit REAL DEFAULT 0,
       balance REAL DEFAULT 0,
@@ -577,6 +587,7 @@ async function initializeDatabase(db: SQLite.SQLiteDatabase) {
       type TEXT,
       amount REAL DEFAULT 0,
       description TEXT,
+      paymentMethod TEXT,
       createdAt TEXT,
       createdBy TEXT
     );
@@ -590,6 +601,24 @@ async function initializeDatabase(db: SQLite.SQLiteDatabase) {
       updatedAt TEXT
     );
   `);
+
+  // Migration for credit_accounts and credit_transactions
+  try {
+    const credInfo = await db.getAllAsync<{ name: string }>("PRAGMA table_info(credit_accounts)");
+    if (!credInfo.some(col => col.name === 'customerAddress')) {
+      await db.execAsync("ALTER TABLE credit_accounts ADD COLUMN customerAddress TEXT;");
+    }
+    if (!credInfo.some(col => col.name === 'creditLimit')) {
+      await db.execAsync("ALTER TABLE credit_accounts ADD COLUMN creditLimit REAL DEFAULT 0;");
+    }
+  } catch (e) { console.error("credit_accounts ALTER error:", e); }
+
+  try {
+    const credTxInfo = await db.getAllAsync<{ name: string }>("PRAGMA table_info(credit_transactions)");
+    if (!credTxInfo.some(col => col.name === 'paymentMethod')) {
+      await db.execAsync("ALTER TABLE credit_transactions ADD COLUMN paymentMethod TEXT;");
+    }
+  } catch (e) { console.error("credit_transactions ALTER error:", e); }
 
   // Backfill businessId = userId and createdBy = userId for all legacy local records
   await db.execAsync(`
@@ -940,8 +969,8 @@ export async function createInvoice(invoice: Invoice, items: InvoiceItem[]): Pro
   await db.withTransactionAsync(async () => {
     // Insert invoice
     await db.runAsync(
-      `INSERT INTO invoices (id, userId, businessId, createdBy, customerName, customerPhone, subtotal, discount, serviceCharges, total, createdAt, synced, lastUpdated, deleted)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO invoices (id, userId, businessId, createdBy, customerName, customerPhone, subtotal, discount, serviceCharges, total, paymentMethod, createdAt, synced, lastUpdated, deleted)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         invoice.id,
         invoice.userId,
@@ -953,6 +982,7 @@ export async function createInvoice(invoice: Invoice, items: InvoiceItem[]): Pro
         invoice.discount,
         invoice.serviceCharges ?? 0,
         invoice.total,
+        invoice.paymentMethod ?? 'cash',
         invoice.createdAt,
         invoice.synced ?? 0,
         invoice.lastUpdated,
@@ -1566,11 +1596,13 @@ export async function getCreditAccountByCustomer(businessId: string, customerId:
 export async function upsertCreditAccount(account: CreditAccount): Promise<void> {
   const db = await getDB();
   await db.runAsync(
-    `INSERT INTO credit_accounts (id, businessId, customerId, customerName, customerPhone, totalDebit, totalCredit, balance, lastTransactionAt, synced, lastUpdated, deleted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO credit_accounts (id, businessId, customerId, customerName, customerPhone, customerAddress, creditLimit, totalDebit, totalCredit, balance, lastTransactionAt, synced, lastUpdated, deleted)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        customerName = excluded.customerName,
        customerPhone = excluded.customerPhone,
+       customerAddress = excluded.customerAddress,
+       creditLimit = excluded.creditLimit,
        totalDebit = excluded.totalDebit,
        totalCredit = excluded.totalCredit,
        balance = excluded.balance,
@@ -1584,6 +1616,8 @@ export async function upsertCreditAccount(account: CreditAccount): Promise<void>
       account.customerId,
       account.customerName,
       account.customerPhone,
+      account.customerAddress ?? '',
+      account.creditLimit ?? 0,
       account.totalDebit,
       account.totalCredit,
       account.balance,
@@ -1601,9 +1635,9 @@ export async function addCreditTransaction(tx: CreditTransaction, account: Credi
 
   // Insert the transaction
   await db.runAsync(
-    `INSERT INTO credit_transactions (id, accountId, businessId, type, amount, description, createdAt, createdBy)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [tx.id, tx.accountId, tx.businessId, tx.type, tx.amount, tx.description || '', tx.createdAt, tx.createdBy]
+    `INSERT INTO credit_transactions (id, accountId, businessId, type, amount, description, paymentMethod, createdAt, createdBy)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [tx.id, tx.accountId, tx.businessId, tx.type, tx.amount, tx.description || '', tx.paymentMethod || '', tx.createdAt, tx.createdBy]
   );
 
   // Recalculate running balance
@@ -1615,6 +1649,33 @@ export async function addCreditTransaction(tx: CreditTransaction, account: Credi
     `UPDATE credit_accounts SET totalDebit = ?, totalCredit = ?, balance = ?, lastTransactionAt = ?, lastUpdated = ? WHERE id = ?`,
     [newDebit, newCredit, newBalance, now, now, account.id]
   );
+}
+
+export async function updateCreditAccountProfile(
+  accountId: string,
+  updates: { customerName?: string; customerPhone?: string; customerAddress?: string; creditLimit?: number }
+): Promise<void> {
+  const db = await getDB();
+  const now = new Date().toISOString();
+  const acc = await getCreditAccount(accountId);
+  if (!acc) return;
+
+  const newName = updates.customerName !== undefined ? updates.customerName : acc.customerName;
+  const newPhone = updates.customerPhone !== undefined ? updates.customerPhone : acc.customerPhone;
+  const newAddress = updates.customerAddress !== undefined ? updates.customerAddress : (acc.customerAddress || '');
+  const newLimit = updates.creditLimit !== undefined ? updates.creditLimit : (acc.creditLimit || 0);
+
+  await db.runAsync(
+    `UPDATE credit_accounts SET customerName = ?, customerPhone = ?, customerAddress = ?, creditLimit = ?, lastUpdated = ? WHERE id = ?`,
+    [newName, newPhone, newAddress, newLimit, now, accountId]
+  );
+
+  if (acc.customerId) {
+    await db.runAsync(
+      `UPDATE customers SET name = ?, phone = ?, address = ?, creditLimit = ?, lastUpdated = ? WHERE id = ?`,
+      [newName, newPhone, newAddress, newLimit, now, acc.customerId]
+    );
+  }
 }
 
 export async function getCreditTransactions(accountId: string): Promise<CreditTransaction[]> {

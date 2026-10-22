@@ -178,6 +178,15 @@ export function generateThermalReceipt(
   byteArrays.push(COMMANDS.LINE_FEED);
   byteArrays.push(COMMANDS.BOLD_OFF);
 
+  const isCredit = (invoice as any).paymentMethod === 'credit' || (invoice as any).isCreditSale;
+  if (isCredit) {
+    addLine('--------------------------------', COMMANDS.ALIGN_CENTER);
+    addLine('*** SALE ON CREDIT / UNPAID ***', COMMANDS.ALIGN_CENTER);
+    if ((invoice as any).customerBalance !== undefined) {
+      addLine(`Khata Balance: Rs. ${Number((invoice as any).customerBalance).toFixed(0)}`, COMMANDS.ALIGN_CENTER);
+    }
+  }
+
   addLine('--------------------------------', COMMANDS.ALIGN_LEFT);
 
   // 10. Footer
@@ -443,6 +452,17 @@ export function generateThermalSlipHTML(
             <span>Grand Total</span>
             <span>Rs. ${invoice.total.toFixed(2)}</span>
           </div>
+
+          ${((invoice as any).paymentMethod === 'credit' || (invoice as any).isCreditSale) ? `
+          <div style="background: #000; color: #fff; font-weight: 900; text-align: center; padding: 4px; margin: 5px 0; font-size: ${is58mm ? '11px' : '13px'}; letter-spacing: 0.5px;">
+            *** SALE ON CREDIT / UNPAID ***
+          </div>
+          ${(invoice as any).customerBalance !== undefined ? `
+          <div style="text-align: center; font-weight: 800; font-size: ${is58mm ? '10px' : '11.5px'}; margin-bottom: 4px;">
+            Total Khata Balance: Rs. ${Number((invoice as any).customerBalance).toLocaleString('en-IN')}
+          </div>
+          ` : ''}
+          ` : ''}
 
           <div class="divider-solid"></div>
 
@@ -1249,4 +1269,235 @@ export async function printReturnExchangeSlip(
   // Mobile: native print dialog formatted for thermal receipt
   await Print.printAsync({ html });
 }
+
+/**
+ * Generates an exact 58mm or 80mm single-sided Payment Recovery Slip HTML matching POS paper rolls
+ */
+export function generatePaymentRecoverySlipHTML(
+  business: Partial<UserSession>,
+  data: {
+    customerName: string;
+    customerPhone?: string;
+    amountPaid: number;
+    remainingBalance: number;
+    channel: string;
+    receiptNo?: string;
+    createdAt?: string;
+  },
+  paperWidth: '58mm' | '80mm' = '80mm'
+): string {
+  const is58mm = paperWidth === '58mm';
+  const contentWidthMm = is58mm ? '52mm' : '74mm';
+  const now = data.createdAt ? new Date(data.createdAt) : new Date();
+  const dateFormatted = now.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const timeFormatted = now.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' });
+  const slipNo = data.receiptNo || 'PAY_' + Math.random().toString(36).substring(2, 8).toUpperCase();
+  const taxId = (business as any).taxNumber || (business as any).ntnNumber || (business as any).gstin || '';
+  const prevBalance = data.remainingBalance + data.amountPaid;
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Payment Receipt #${slipNo}</title>
+        <style>
+          @page {
+            size: ${paperWidth} auto;
+            margin: 0;
+          }
+          body {
+            margin: 0;
+            padding: 0;
+            background: #ffffff;
+            color: #000000 !important;
+          }
+          .receipt {
+            width: ${contentWidthMm} !important;
+            max-width: ${contentWidthMm} !important;
+            margin: 0 auto;
+            padding: ${is58mm ? '3mm 1mm' : '5mm 2mm'};
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Courier New', monospace, sans-serif;
+            font-size: ${is58mm ? '11.5px' : '13px'};
+            line-height: 1.25;
+            color: #000000;
+          }
+          .store-name {
+            font-size: ${is58mm ? '15px' : '18px'};
+            font-weight: 900;
+            text-align: center;
+            margin-bottom: 2px;
+            letter-spacing: 0.2px;
+            text-transform: uppercase;
+          }
+          .store-sub {
+            font-size: ${is58mm ? '10px' : '11.5px'};
+            text-align: center;
+            font-weight: 600;
+            margin: 1px 0;
+            color: #111;
+          }
+          .divider-solid {
+            border-top: 1.5px solid #000000;
+            margin: 4px 0;
+          }
+          .receipt-title {
+            text-align: center;
+            font-size: ${is58mm ? '12px' : '14px'};
+            font-weight: 900;
+            letter-spacing: 1px;
+            padding: 3px 0;
+          }
+          .meta-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: ${is58mm ? '10.5px' : '12px'};
+            font-weight: 600;
+            line-height: 1.35;
+            margin-bottom: 2px;
+          }
+          .grand-total-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: ${is58mm ? '13px' : '15px'};
+            font-weight: 900;
+            margin: 5px 0 3px 0;
+          }
+          .footer-section {
+            text-align: center;
+            font-size: ${is58mm ? '10.5px' : '11.5px'};
+            margin-top: 6px;
+            line-height: 1.35;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="receipt">
+          <div class="store-name">${business.businessName || business.name || 'MY BUSINESS'}</div>
+          ${business.address ? `<div class="store-sub">${business.address}</div>` : ''}
+          ${business.phone ? `<div class="store-sub">Tel: ${business.phone}</div>` : ''}
+          ${taxId ? `<div class="store-sub">GST / NTN: ${taxId}</div>` : ''}
+          
+          <div class="divider-solid"></div>
+          <div class="receipt-title">*** PAYMENT RECOVERY RECEIPT ***</div>
+          <div class="divider-solid"></div>
+
+          <div class="meta-row">
+            <span>Customer:</span>
+            <span style="font-weight: 800;">${data.customerName}</span>
+          </div>
+          ${data.customerPhone ? `
+          <div class="meta-row">
+            <span>Phone:</span>
+            <span>${data.customerPhone}</span>
+          </div>` : ''}
+          <div class="meta-row">
+            <span>Receipt No:</span>
+            <span style="font-weight: 800;">#${slipNo}</span>
+          </div>
+          <div class="meta-row">
+            <span>Date & Time:</span>
+            <span>${dateFormatted} ${timeFormatted}</span>
+          </div>
+          <div class="meta-row">
+            <span>Settlement Mode:</span>
+            <span style="font-weight: 700;">${data.channel || 'Cash'}</span>
+          </div>
+
+          <div class="divider-solid"></div>
+
+          <div class="meta-row" style="padding: 2px 0;">
+            <span>Previous Khata Balance:</span>
+            <span>Rs. ${prevBalance.toFixed(2)}</span>
+          </div>
+          <div class="meta-row" style="padding: 2px 0; font-weight: 800;">
+            <span>Amount Received:</span>
+            <span style="color: #000;">-Rs. ${data.amountPaid.toFixed(2)}</span>
+          </div>
+
+          <div class="divider-solid"></div>
+
+          <div class="grand-total-row">
+            <span>Remaining Balance</span>
+            <span>Rs. ${Math.max(0, data.remainingBalance).toFixed(2)}</span>
+          </div>
+
+          <div class="divider-solid"></div>
+
+          <div class="footer-section">
+            <div style="font-weight: 700;">Payment Received with Thanks!</div>
+            <div style="font-size: 10px; color: #555555; margin-top: 4px; font-weight: 600;">Prepared by Vaypar POS</div>
+          </div>
+          <br/>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+/**
+ * Prints the Payment Recovery Slip via native print or web iframe
+ */
+export async function printPaymentRecoverySlip(
+  business: Partial<UserSession>,
+  data: {
+    customerName: string;
+    customerPhone?: string;
+    amountPaid: number;
+    remainingBalance: number;
+    channel: string;
+    receiptNo?: string;
+    createdAt?: string;
+  },
+  paperWidth: '58mm' | '80mm' = '80mm'
+): Promise<void> {
+  const html = generatePaymentRecoverySlipHTML(business, data, paperWidth);
+
+  if (Platform.OS === 'web') {
+    try {
+      const existing = document.getElementById('thermal-print-iframe');
+      if (existing) {
+        existing.remove();
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.id = 'thermal-print-iframe';
+      iframe.style.position = 'fixed';
+      iframe.style.left = '-9999px';
+      iframe.style.top = '0px';
+      iframe.style.width = paperWidth === '58mm' ? '300px' : '400px';
+      iframe.style.height = '1200px';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0.01';
+      iframe.style.pointerEvents = 'none';
+      iframe.style.zIndex = '-999';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow?.document;
+      if (doc) {
+        doc.open();
+        doc.write(html);
+        doc.close();
+
+        setTimeout(() => {
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+          } catch (err) {
+            openThermalPrintWindow(html);
+          }
+        }, 350);
+        return;
+      }
+    } catch (e) {
+      openThermalPrintWindow(html);
+      return;
+    }
+    return;
+  }
+
+  await Print.printAsync({ html });
+}
+
 

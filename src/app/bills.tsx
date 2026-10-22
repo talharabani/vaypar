@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Alert,
     FlatList,
@@ -340,6 +340,34 @@ export default function BillsScreen() {
     setPhoneDropdownOpen(false);
     setNameDropdownOpen(false);
   };
+
+  // Credit Accounts state & live limit warning for Credit Sales
+  const [creditAccounts, setCreditAccounts] = useState<sqlite.CreditAccount[]>([]);
+
+  const loadCreditAccounts = useCallback(async () => {
+    if (user?.businessId) {
+      try {
+        const accs = await sqlite.getCreditAccounts(user.businessId);
+        setCreditAccounts(accs);
+      } catch (e) {
+        console.warn('Failed to load credit accounts in bills:', e);
+      }
+    }
+  }, [user?.businessId]);
+
+  useEffect(() => {
+    loadCreditAccounts();
+  }, [loadCreditAccounts]);
+
+  const selectedCreditAccount = useMemo(() => {
+    if (!customerName && !customerPhone) return null;
+    const cleanName = customerName.trim().toLowerCase();
+    const cleanPhone = customerPhone.trim();
+    return creditAccounts.find(a => 
+      (cleanPhone && a.customerPhone && a.customerPhone === cleanPhone) ||
+      (cleanName && a.customerName && a.customerName.trim().toLowerCase() === cleanName)
+    ) || null;
+  }, [creditAccounts, customerName, customerPhone]);
   
   // Current item being selected/edited
   const [productPickerVisible, setProductPickerVisible] = useState(false);
@@ -413,6 +441,25 @@ export default function BillsScreen() {
 
     return { subtotal, discount, serviceCharges, total, totalPurchaseCost, grossProfit, profitMargin };
   }, [invoiceItems, discountInput, serviceChargeInput, serviceChargeType, products]);
+
+  // Credit Limit Warning Calculation
+  const creditLimitWarning = useMemo(() => {
+    if (billingPaymentType !== 'credit') return null;
+    if (!selectedCreditAccount) return null;
+    const limit = selectedCreditAccount.creditLimit || 0;
+    if (limit <= 0) return null;
+    const currentBal = selectedCreditAccount.balance || 0;
+    const projectedBal = currentBal + invoiceTotals.total;
+    if (projectedBal > limit) {
+      return {
+        limit,
+        currentBal,
+        projectedBal,
+        exceededBy: projectedBal - limit,
+      };
+    }
+    return null;
+  }, [billingPaymentType, selectedCreditAccount, invoiceTotals.total]);
 
   // Return & Exchange calculations
   const selectedReturnItem = useMemo(() => {
@@ -683,9 +730,17 @@ export default function BillsScreen() {
         Alert.alert('Invalid Customer Name', nameVal.error || 'Name cannot contain numbers.');
         return;
       }
-    } else if (billingPaymentType === 'credit') {
-      Alert.alert('Customer Name Required', 'Please enter customer name to issue an invoice on credit.');
-      return;
+    }
+
+    if (billingPaymentType === 'credit') {
+      if (!customerName.trim()) {
+        Alert.alert('Customer Name Required', 'Credit / Udhar bill issue karne ke liye customer ka naam zaroori hai.');
+        return;
+      }
+      if (customerName.trim().toLowerCase() === 'walk-in' || customerName.trim().toLowerCase() === 'walk-in customer') {
+        Alert.alert('Invalid Customer', 'Walk-in customer ko credit / udhar par sale nahi di ja sakti. Asal customer ka naam enter karein.');
+        return;
+      }
     }
 
     let finalCustomerPhone = customerPhone.trim();
@@ -714,133 +769,164 @@ export default function BillsScreen() {
       }
     }
 
-    setIsSavingBill(true);
-    try {
-      const itemsPayload = invoiceItems.map(item => ({
-        productId: item.productId,
-        productName: item.productName,
-        price: item.price,
-        quantity: item.quantity,
-        total: item.total
-      }));
+    const executeInvoiceCreation = async () => {
+      setIsSavingBill(true);
+      try {
+        const targetCustomerName = customerName.trim();
+        const targetCustomerPhone = finalCustomerPhone;
+        const targetPaymentType = billingPaymentType;
 
-      const newInvoiceId = await createInvoice(
-        customerName.trim(),
-        finalCustomerPhone,
-        invoiceTotals.subtotal,
-        invoiceTotals.discount,
-        invoiceTotals.total,
-        itemsPayload,
-        invoiceTotals.serviceCharges
-      );
+        const itemsPayload = invoiceItems.map(item => ({
+          productId: item.productId,
+          productName: item.productName,
+          price: item.price,
+          quantity: item.quantity,
+          total: item.total
+        }));
 
-      // Successfully saved! Let's retrieve the newly saved invoice to preview it
-      const now = new Date().toISOString();
-      const mockInvoice: sqlite.Invoice = {
-        id: newInvoiceId,
-        userId: user?.id || 'temp',
-        businessId: user?.businessId || 'temp',
-        createdBy: user?.id || 'temp',
-        customerName: customerName.trim(),
-        customerPhone: finalCustomerPhone,
-        subtotal: invoiceTotals.subtotal,
-        discount: invoiceTotals.discount,
-        serviceCharges: invoiceTotals.serviceCharges,
-        total: invoiceTotals.total,
-        createdAt: now,
-        lastUpdated: now
-      };
+        const newInvoiceId = await createInvoice(
+          targetCustomerName,
+          targetCustomerPhone,
+          invoiceTotals.subtotal,
+          invoiceTotals.discount,
+          invoiceTotals.total,
+          itemsPayload,
+          invoiceTotals.serviceCharges,
+          targetPaymentType
+        );
 
-      const mockItems: sqlite.InvoiceItem[] = invoiceItems.map((item, idx) => ({
-        id: `item_${idx}`,
-        invoiceId: newInvoiceId,
-        productId: item.productId,
-        productName: item.productName,
-        price: item.price,
-        quantity: item.quantity,
-        total: item.total
-      }));
+        const now = new Date().toISOString();
+        let updatedKhataBalance: number | undefined = undefined;
 
-      // Reset bill inputs
-      setInvoiceItems([]);
-      setCustomerName('');
-      setCustomerPhone('');
-      setDiscountInput('');
-      setServiceChargeInput('');
+        // If Credit Sale: automatically record in Customer Credit Ledger
+        if (targetPaymentType === 'credit' && user?.businessId) {
+          try {
+            const businessId = user.businessId;
+            const existingAccounts = await sqlite.getCreditAccounts(businessId);
+            let targetAccount = existingAccounts.find(
+              a => a.customerName.trim().toLowerCase() === targetCustomerName.toLowerCase() ||
+                   (targetCustomerPhone && a.customerPhone === targetCustomerPhone)
+            );
 
-      // If Credit Sale: automatically record in Customer Credit Ledger
-      if (billingPaymentType === 'credit' && user?.businessId) {
-        try {
-          const businessId = user.businessId;
-          const existingAccounts = await sqlite.getCreditAccounts(businessId);
-          let targetAccount = existingAccounts.find(
-            a => a.customerName.trim().toLowerCase() === customerName.trim().toLowerCase() ||
-                 (finalCustomerPhone && a.customerPhone === finalCustomerPhone)
-          );
+            if (!targetAccount) {
+              const custId = 'cust_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+              await sqlite.upsertCustomer({
+                id: custId,
+                businessId,
+                name: targetCustomerName,
+                phone: targetCustomerPhone,
+                synced: 0,
+                lastUpdated: now,
+              });
+              const accountId = 'crd_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+              targetAccount = {
+                id: accountId,
+                businessId,
+                customerId: custId,
+                customerName: targetCustomerName,
+                customerPhone: targetCustomerPhone,
+                totalDebit: 0,
+                totalCredit: 0,
+                balance: 0,
+                lastTransactionAt: now,
+                synced: 0,
+                lastUpdated: now,
+              };
+              await sqlite.upsertCreditAccount(targetAccount);
+            }
 
-          if (!targetAccount) {
-            const custId = 'cust_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
-            await sqlite.upsertCustomer({
-              id: custId,
+            const tx: sqlite.CreditTransaction = {
+              id: 'crd_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36),
+              accountId: targetAccount.id,
               businessId,
-              name: customerName.trim(),
-              phone: finalCustomerPhone,
-              synced: 0,
-              lastUpdated: now,
-            });
-            const accountId = 'crd_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
-            targetAccount = {
-              id: accountId,
-              businessId,
-              customerId: custId,
-              customerName: customerName.trim(),
-              customerPhone: finalCustomerPhone,
-              totalDebit: 0,
-              totalCredit: 0,
-              balance: 0,
-              lastTransactionAt: now,
-              synced: 0,
-              lastUpdated: now,
+              type: 'debit',
+              amount: invoiceTotals.total,
+              description: `Credit Sale · Invoice #${newInvoiceId.toUpperCase()} (${invoiceItems.length} items)`,
+              createdAt: now,
+              createdBy: user.id,
             };
-            await sqlite.upsertCreditAccount(targetAccount);
+            await sqlite.addCreditTransaction(tx, targetAccount);
+            updatedKhataBalance = (targetAccount.balance || 0) + invoiceTotals.total;
+            loadCreditAccounts();
+          } catch (credErr) {
+            console.warn('Failed to auto-log credit sale:', credErr);
           }
-
-          const tx: sqlite.CreditTransaction = {
-            id: 'crd_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36),
-            accountId: targetAccount.id,
-            businessId,
-            type: 'debit',
-            amount: invoiceTotals.total,
-            description: `Credit Sale · Invoice #${newInvoiceId.toUpperCase()} (${invoiceItems.length} items)`,
-            createdAt: now,
-            createdBy: user.id,
-          };
-          await sqlite.addCreditTransaction(tx, targetAccount);
-        } catch (credErr) {
-          console.warn('Failed to auto-log credit sale:', credErr);
         }
+
+        const mockInvoice: sqlite.Invoice = {
+          id: newInvoiceId,
+          userId: user?.id || 'temp',
+          businessId: user?.businessId || 'temp',
+          createdBy: user?.id || 'temp',
+          customerName: targetCustomerName,
+          customerPhone: targetCustomerPhone,
+          subtotal: invoiceTotals.subtotal,
+          discount: invoiceTotals.discount,
+          serviceCharges: invoiceTotals.serviceCharges,
+          total: invoiceTotals.total,
+          paymentMethod: targetPaymentType,
+          customerBalance: updatedKhataBalance,
+          createdAt: now,
+          lastUpdated: now
+        } as any;
+
+        const mockItems: sqlite.InvoiceItem[] = invoiceItems.map((item, idx) => ({
+          id: `item_${idx}`,
+          invoiceId: newInvoiceId,
+          productId: item.productId,
+          productName: item.productName,
+          price: item.price,
+          quantity: item.quantity,
+          total: item.total
+        }));
+
+        // Reset bill inputs
+        setInvoiceItems([]);
+        setCustomerName('');
+        setCustomerPhone('');
+        setDiscountInput('0');
+        setServiceChargeInput('');
+        setBillingPaymentType('cash');
+        
+        // Navigate to History Tab
+        setActiveTab('history');
+
+        // Trigger preview popup
+        setSelectedInvoice(mockInvoice);
+        setSelectedInvoiceItems(mockItems);
+        setReceiptVisible(true);
+
+      } catch (e: any) {
+        Alert.alert('Failed to Save Invoice', e.message || 'SQLite transaction failed.');
+      } finally {
+        setIsSavingBill(false);
+      }
+    };
+
+    // Credit Limit check before finalizing credit sale
+    if (creditLimitWarning) {
+      const msg = `Customer credit limit is PKR ${creditLimitWarning.limit.toLocaleString('en-IN')}.\nCurrent balance: PKR ${creditLimitWarning.currentBal.toLocaleString('en-IN')}.\nThis bill: PKR ${invoiceTotals.total.toLocaleString('en-IN')}.\nTotal after bill: PKR ${creditLimitWarning.projectedBal.toLocaleString('en-IN')}.\n\nLimit will be exceeded by PKR ${creditLimitWarning.exceededBy.toLocaleString('en-IN')}. Do you want to authorize this credit sale?`;
+      
+      if (Platform.OS === 'web') {
+        const confirmed = window.confirm(`⚠️ CREDIT LIMIT EXCEEDED!\n\n${msg}`);
+        if (confirmed) {
+          executeInvoiceCreation();
+        }
+        return;
       }
 
-      // Reset Create Form
-      setCustomerName('');
-      setCustomerPhone('');
-      setInvoiceItems([]);
-      setDiscountInput('0');
-      setBillingPaymentType('cash');
-      
-      // Navigate to History Tab
-      setActiveTab('history');
-
-      // Trigger preview popup
-      setSelectedInvoice(mockInvoice);
-      setSelectedInvoiceItems(mockItems);
-      setReceiptVisible(true);
-
-    } catch (e: any) {
-      Alert.alert('Failed to Save Invoice', e.message || 'SQLite transaction failed.');
-    } finally {
-      setIsSavingBill(false);
+      Alert.alert(
+        '⚠️ Credit Limit Exceeded',
+        msg,
+        [
+          { text: 'Cancel / Review', style: 'cancel' },
+          { text: 'Authorize Credit Sale', style: 'destructive', onPress: executeInvoiceCreation }
+        ]
+      );
+      return;
     }
+
+    executeInvoiceCreation();
   };
 
   const handleSaveInstallmentPlan = async () => {
@@ -1411,6 +1497,53 @@ export default function BillsScreen() {
                 )}
               </View>
             </View>
+
+            {/* Credit Customer Status & Limit Alert Card */}
+            {billingPaymentType === 'credit' && (
+              <View style={{
+                marginTop: 10,
+                padding: 10,
+                borderRadius: 10,
+                borderWidth: 1.5,
+                borderColor: creditLimitWarning ? '#EF4444' : '#3B82F650',
+                backgroundColor: creditLimitWarning ? '#EF444412' : '#3B82F610',
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name={creditLimitWarning ? 'alert-circle' : 'card'} size={17} color={creditLimitWarning ? '#DC2626' : '#2563EB'} />
+                    <Text style={{ fontSize: 12.5, fontWeight: '800', color: creditLimitWarning ? '#DC2626' : '#2563EB' }}>
+                      {selectedCreditAccount ? 'Store Khata Account Active' : 'New Credit Customer (Khata will be created)'}
+                    </Text>
+                  </View>
+                  {selectedCreditAccount && (
+                    <View style={{ backgroundColor: selectedCreditAccount.creditLimit ? '#16A34A18' : theme.border + '60', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: selectedCreditAccount.creditLimit ? '#16A34A' : theme.textSecondary }}>
+                        Limit: {selectedCreditAccount.creditLimit ? `PKR ${selectedCreditAccount.creditLimit.toLocaleString('en-IN')}` : 'No Limit'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {selectedCreditAccount && (
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                    <Text style={{ fontSize: 11.5, color: theme.text }}>
+                      Current Udhar: <Text style={{ fontWeight: '800', color: '#DC2626' }}>PKR {(selectedCreditAccount.balance || 0).toLocaleString('en-IN')}</Text>
+                    </Text>
+                    <Text style={{ fontSize: 11.5, color: theme.text }}>
+                      After this Bill: <Text style={{ fontWeight: '800', color: creditLimitWarning ? '#DC2626' : '#16A34A' }}>PKR {((selectedCreditAccount.balance || 0) + invoiceTotals.total).toLocaleString('en-IN')}</Text>
+                    </Text>
+                  </View>
+                )}
+
+                {creditLimitWarning && (
+                  <View style={{ marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#EF444430' }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#DC2626' }}>
+                      ⚠️ Credit limit exceeded by PKR {creditLimitWarning.exceededBy.toLocaleString('en-IN')}! Requires confirmation before issuing.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
           </Card>
 
           {/* Product Items Block */}

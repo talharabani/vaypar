@@ -28,7 +28,7 @@ interface DatabaseContextType {
   deleteProduct: (id: string) => Promise<void>;
   
   // Invoice Operations
-  createInvoice: (customerName: string, customerPhone: string, subtotal: number, discount: number, total: number, items: Omit<sqlite.InvoiceItem, 'id' | 'invoiceId'>[], serviceCharges?: number) => Promise<string>;
+  createInvoice: (customerName: string, customerPhone: string, subtotal: number, discount: number, total: number, items: Omit<sqlite.InvoiceItem, 'id' | 'invoiceId'>[], serviceCharges?: number, paymentMethod?: string) => Promise<string>;
   deleteInvoice: (id: string) => Promise<void>;
   
   // Returns & Exchanges Operations
@@ -353,7 +353,8 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     discount: number, 
     total: number, 
     items: Omit<sqlite.InvoiceItem, 'id' | 'invoiceId'>[],
-    serviceCharges: number = 0
+    serviceCharges: number = 0,
+    paymentMethod: string = 'cash'
   ) => {
     if (!user) throw new Error('Authentication required');
     
@@ -372,6 +373,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
       discount,
       serviceCharges: serviceCharges || 0,
       total,
+      paymentMethod,
       createdAt: now,
       synced: 0,
       lastUpdated: now,

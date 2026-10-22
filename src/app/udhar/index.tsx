@@ -24,6 +24,8 @@ import { useBusinessCategory } from '../../context/BusinessContext';
 import { useDatabase } from '../../context/DatabaseContext';
 import { useTheme } from '../../hooks/use-theme';
 import * as sqlite from '../../services/sqlite';
+import { printPaymentRecoverySlip } from '../../services/thermalPrinter';
+import { openWhatsAppAgingReminder, openWhatsAppPaymentReceipt } from '../../utils/invoiceShare';
 import { detectCountryCode, validateCustomerName, validateCustomerPhone } from '../../utils/phoneUtils';
 
 // ─── Categories that support installment plans ───────────────────────────────
@@ -248,6 +250,8 @@ function AddCustomerModal({
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [creditLimit, setCreditLimit] = useState('');
   const [countryCode, setCountryCode] = useState(() => detectCountryCode(user?.phone));
   const [saving, setSaving] = useState(false);
 
@@ -276,20 +280,27 @@ function AddCustomerModal({
     try {
       const now = new Date().toISOString();
       const custId = uid();
+      const parsedLimit = parseFloat(creditLimit) || 0;
+
       await sqlite.upsertCustomer({
         id: custId,
         businessId,
         name: name.trim(),
         phone: finalPhone,
+        address: address.trim() || undefined,
+        creditLimit: parsedLimit,
         synced: 0,
         lastUpdated: now,
       });
+
       await sqlite.upsertCreditAccount({
         id: uid(),
         businessId,
         customerId: custId,
         customerName: name.trim(),
         customerPhone: finalPhone,
+        customerAddress: address.trim() || undefined,
+        creditLimit: parsedLimit,
         totalDebit: 0,
         totalCredit: 0,
         balance: 0,
@@ -297,8 +308,11 @@ function AddCustomerModal({
         synced: 0,
         lastUpdated: now,
       });
+
       setName('');
       setPhone('');
+      setAddress('');
+      setCreditLimit('');
       onSave();
       onClose();
     } catch (e: any) {
@@ -311,14 +325,327 @@ function AddCustomerModal({
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={s.overlay}>
-        <Card style={[s.sheet, { backgroundColor: theme.backgroundElement }]}>
-          <Text style={[s.sheetTitle, { color: theme.text }]}>Open New Credit Account</Text>
-          <Text style={[s.sheetSub, { color: theme.textSecondary, marginBottom: 12 }]}>
-            Register a verified customer profile for store credit and ledger tracking.
-          </Text>
-          <CustomerNameInput placeholder="Customer Name *" value={name} onChangeText={setName} required />
-          <CustomerPhoneInput label="Phone Number" value={phone} onChangeText={setPhone} selectedCountryCode={countryCode} onCountryCodeChange={setCountryCode} />
-          <ModalActions onCancel={onClose} onConfirm={handleSave} saving={saving} confirmLabel="Create Account" />
+        <Card style={[s.sheet, { backgroundColor: theme.backgroundElement, maxHeight: '92%' }]}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={[s.sheetTitle, { color: theme.text }]}>Open New Credit Account</Text>
+            <Text style={[s.sheetSub, { color: theme.textSecondary, marginBottom: 12 }]}>
+              Register customer profile with credit limit and address for digital Khata.
+            </Text>
+            <CustomerNameInput placeholder="Customer Name *" value={name} onChangeText={setName} required />
+            <CustomerPhoneInput label="Phone Number" value={phone} onChangeText={setPhone} selectedCountryCode={countryCode} onCountryCodeChange={setCountryCode} />
+
+            <View style={{ marginTop: 8 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, marginBottom: 4 }}>
+                ADDRESS / LOCATION
+              </Text>
+              <InlineInput placeholder="e.g. Shop #12, Market Rd, Rawalpindi" value={address} onChangeText={setAddress} />
+            </View>
+
+            <View style={{ marginTop: 8, marginBottom: 14 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, marginBottom: 4 }}>
+                CREDIT LIMIT (PKR)
+              </Text>
+              <InlineInput
+                placeholder="e.g. 50000 (0 = No Limit)"
+                value={creditLimit}
+                onChangeText={setCreditLimit}
+                keyboardType="numeric"
+              />
+              <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                {[10000, 25000, 50000, 100000].map(val => (
+                  <TouchableOpacity
+                    key={val}
+                    onPress={() => setCreditLimit(val.toString())}
+                    style={{
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                      backgroundColor: theme.background,
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: theme.text }}>
+                      {formatPKR(val)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  onPress={() => setCreditLimit('0')}
+                  style={{
+                    paddingHorizontal: 8,
+                    paddingVertical: 4,
+                    borderRadius: 6,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                    backgroundColor: theme.background,
+                  }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>No Limit</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ModalActions onCancel={onClose} onConfirm={handleSave} saving={saving} confirmLabel="Create Khata Account" />
+          </ScrollView>
+        </Card>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── EDIT CUSTOMER PROFILE MODAL ──────────────────────────────────────────────
+function EditCustomerProfileModal({
+  visible,
+  account,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  account: sqlite.CreditAccount | null;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const theme = useTheme();
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [creditLimit, setCreditLimit] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (account) {
+      setName(account.customerName || '');
+      setPhone(account.customerPhone || '');
+      setAddress(account.customerAddress || '');
+      setCreditLimit(account.creditLimit && account.creditLimit > 0 ? account.creditLimit.toString() : '');
+    }
+  }, [account]);
+
+  if (!account) return null;
+
+  const handleUpdate = async () => {
+    if (!name.trim()) {
+      Alert.alert('Required', 'Customer name is required.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const parsedLimit = parseFloat(creditLimit) || 0;
+      await sqlite.updateCreditAccountProfile(account.id, {
+        customerName: name.trim(),
+        customerPhone: phone.trim(),
+        customerAddress: address.trim(),
+        creditLimit: parsedLimit,
+      });
+      onSave();
+      onClose();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to update customer profile.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <View style={s.overlay}>
+        <Card style={[s.sheet, { backgroundColor: theme.backgroundElement, maxHeight: '90%' }]}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={[s.sheetTitle, { color: theme.text }]}>Edit Customer Profile & Khata Limit</Text>
+            <Text style={[s.sheetSub, { color: theme.textSecondary, marginBottom: 12 }]}>
+              Update contact info, address, and credit limit.
+            </Text>
+
+            <CustomerNameInput placeholder="Customer Name *" value={name} onChangeText={setName} required />
+            <InlineInput placeholder="Phone Number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+            
+            <View style={{ marginTop: 8 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, marginBottom: 4 }}>
+                SHOP / RESIDENCE ADDRESS
+              </Text>
+              <InlineInput placeholder="e.g. Shop #4, Main Bazar, Lahore" value={address} onChangeText={setAddress} />
+            </View>
+
+            <View style={{ marginTop: 10, marginBottom: 16 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, marginBottom: 4 }}>
+                MAX CREDIT LIMIT (PKR)
+              </Text>
+              <InlineInput
+                placeholder="e.g. 50000 (0 = No Limit)"
+                value={creditLimit}
+                onChangeText={setCreditLimit}
+                keyboardType="numeric"
+              />
+              <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                {[10000, 25000, 50000, 100000].map(val => (
+                  <TouchableOpacity
+                    key={val}
+                    onPress={() => setCreditLimit(val.toString())}
+                    style={{
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                      backgroundColor: theme.background,
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: theme.text }}>
+                      {formatPKR(val)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  onPress={() => setCreditLimit('0')}
+                  style={{
+                    paddingHorizontal: 8,
+                    paddingVertical: 4,
+                    borderRadius: 6,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                    backgroundColor: theme.background,
+                  }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>No Limit</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ModalActions onCancel={onClose} onConfirm={handleUpdate} saving={saving} confirmLabel="Save Changes" />
+          </ScrollView>
+        </Card>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── PAYMENT RECOVERY RECEIPT MODAL ───────────────────────────────────────────
+function PaymentRecoveryReceiptModal({
+  visible,
+  data,
+  onClose,
+  business,
+}: {
+  visible: boolean;
+  data: {
+    customerName: string;
+    customerPhone?: string;
+    amountPaid: number;
+    remainingBalance: number;
+    channel: string;
+    receiptNo?: string;
+  } | null;
+  onClose: () => void;
+  business: any;
+}) {
+  const theme = useTheme();
+  const [printing, setPrinting] = useState(false);
+
+  if (!data) return null;
+
+  const handleWhatsApp = async () => {
+    if (!data.customerPhone) {
+      Alert.alert('Phone Required', 'Customer ka valid mobile number enter karein.');
+      return;
+    }
+    await openWhatsAppPaymentReceipt(
+      business,
+      data.customerName,
+      data.customerPhone,
+      data.amountPaid,
+      data.remainingBalance,
+      data.channel,
+      data.receiptNo,
+      Platform.OS === 'web' ? 'web' : 'app'
+    );
+  };
+
+  const handlePrint = async () => {
+    setPrinting(true);
+    try {
+      await printPaymentRecoverySlip(business, data);
+    } catch (e: any) {
+      Alert.alert('Print Error', e.message || 'Thermal slip printing failed.');
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={s.overlay}>
+        <Card style={[s.sheet, { backgroundColor: theme.backgroundElement, maxWidth: 440, width: '92%' }]}>
+          <View style={{ alignItems: 'center', marginBottom: 14 }}>
+            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: '#16A34A18', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+              <Ionicons name="checkmark-done-circle" size={34} color="#16A34A" />
+            </View>
+            <Text style={[s.sheetTitle, { color: theme.text, fontSize: 18, marginBottom: 2 }]}>
+              Payment Recorded Successfully!
+            </Text>
+            <Text style={{ fontSize: 12, color: theme.textSecondary }}>
+              Khata Ledger Balance has been updated in real-time.
+            </Text>
+          </View>
+
+          {/* Receipt Slip Box */}
+          <View style={{ backgroundColor: theme.background, borderRadius: 12, borderWidth: 1, borderColor: theme.border, padding: 14, marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: theme.border, paddingBottom: 8, marginBottom: 8 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>RECEIPT NO: #{data.receiptNo || 'REC_01'}</Text>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>MODE: {data.channel}</Text>
+            </View>
+
+            <View style={{ gap: 6 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Text style={{ fontSize: 12, color: theme.textSecondary }}>Customer:</Text>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: theme.text }}>{data.customerName}</Text>
+              </View>
+              {data.customerPhone ? (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary }}>Phone:</Text>
+                  <Text style={{ fontSize: 12, color: theme.text }}>{data.customerPhone}</Text>
+                </View>
+              ) : null}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 6, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>Amount Received:</Text>
+                <Text style={{ fontSize: 18, fontWeight: '900', color: '#16A34A' }}>
+                  {formatPKR(data.amountPaid)}
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 6, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>Remaining Balance:</Text>
+                <Text style={{ fontSize: 16, fontWeight: '900', color: data.remainingBalance > 0 ? '#DC2626' : '#16A34A' }}>
+                  {formatPKR(Math.max(0, data.remainingBalance))}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Action Buttons */}
+          <View style={{ gap: 8 }}>
+            <Button
+              title="Share Receipt on WhatsApp"
+              variant="secondary"
+              size="medium"
+              onPress={handleWhatsApp}
+              icon={<Ionicons name="logo-whatsapp" size={18} color="#25D366" />}
+              style={{ backgroundColor: '#25D36618', borderColor: '#25D366' }}
+            />
+            <Button
+              title="Print Thermal Slip"
+              variant="primary"
+              size="medium"
+              loading={printing}
+              onPress={handlePrint}
+              icon={<Ionicons name="print-outline" size={18} color="#FFFFFF" />}
+            />
+            <Button
+              title="Done / Close"
+              variant="outline"
+              size="medium"
+              onPress={onClose}
+            />
+          </View>
         </Card>
       </View>
     </Modal>
@@ -333,6 +660,8 @@ function AddTransactionModal({
   onClose,
   onSave,
   userId,
+  initialType = 'debit',
+  onPaymentCompleted,
 }: {
   visible: boolean;
   account: sqlite.CreditAccount | null;
@@ -340,12 +669,21 @@ function AddTransactionModal({
   onClose: () => void;
   onSave: () => void;
   userId: string;
+  initialType?: 'debit' | 'credit';
+  onPaymentCompleted?: (paymentData: {
+    customerName: string;
+    customerPhone?: string;
+    amountPaid: number;
+    remainingBalance: number;
+    channel: string;
+    receiptNo: string;
+  }) => void;
 }) {
   const theme = useTheme();
-  const [type, setType] = useState<'debit' | 'credit'>('debit');
+  const [type, setType] = useState<'debit' | 'credit'>(initialType);
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
-  const [paymentChannel, setPaymentChannel] = useState<'Cash' | 'Bank Transfer' | 'Online POS' | 'Cheque'>('Cash');
+  const [paymentChannel, setPaymentChannel] = useState<'Cash' | 'Bank Transfer' | 'EasyPaisa' | 'JazzCash' | 'Online POS' | 'Cheque'>('Cash');
   const [productPickerVisible, setProductPickerVisible] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -353,10 +691,10 @@ function AddTransactionModal({
     if (visible) {
       setAmount('');
       setDescription('');
-      setType('debit');
+      setType(initialType);
       setPaymentChannel('Cash');
     }
-  }, [visible]);
+  }, [visible, initialType]);
 
   if (!account) return null;
 
@@ -375,11 +713,23 @@ function AddTransactionModal({
       Alert.alert('Invalid Amount', 'Please enter a valid transaction amount greater than zero.');
       return;
     }
+
+    if (type === 'debit' && account.creditLimit && account.creditLimit > 0 && newBal > account.creditLimit) {
+      const exceeded = newBal - account.creditLimit;
+      const msg = `This transaction will exceed the customer's credit limit of ${formatPKR(account.creditLimit)} by ${formatPKR(exceeded)}.\n\nProceed and authorize this debit?`;
+      if (Platform.OS === 'web') {
+        const ok = window.confirm(`⚠️ Credit Limit Warning\n\n${msg}`);
+        if (!ok) return;
+      }
+    }
+
     setSaving(true);
     try {
       const fullDesc = description.trim()
         ? `${description.trim()} · ${type === 'credit' ? `[Paid via ${paymentChannel}]` : '[Credit Debit]'}`
         : type === 'credit' ? `Payment Received via ${paymentChannel}` : 'Goods Taken on Credit';
+
+      const receiptNo = 'REC_' + Math.random().toString(36).substring(2, 8).toUpperCase();
 
       await sqlite.addCreditTransaction(
         {
@@ -389,6 +739,7 @@ function AddTransactionModal({
           type,
           amount: parsedAmt,
           description: fullDesc,
+          paymentMethod: paymentChannel,
           createdAt: new Date().toISOString(),
           createdBy: userId,
         },
@@ -396,6 +747,17 @@ function AddTransactionModal({
       );
       onSave();
       onClose();
+
+      if (type === 'credit' && onPaymentCompleted) {
+        onPaymentCompleted({
+          customerName: account.customerName,
+          customerPhone: account.customerPhone,
+          amountPaid: parsedAmt,
+          remainingBalance: newBal,
+          channel: paymentChannel,
+          receiptNo,
+        });
+      }
     } catch (e: any) {
       Alert.alert('Transaction Failed', e.message);
     } finally {
@@ -580,7 +942,16 @@ function AddTransactionModal({
                   >
                     <Ionicons name="checkmark-done" size={14} color="#16A34A" />
                     <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#16A34A' }}>
-                      Pay Full Balance ({formatPKR(currentBal)})
+                      Full ({formatPKR(currentBal)})
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setAmount(Math.round(currentBal / 2).toString())}
+                    style={[s.quickAmountChip, { backgroundColor: '#2563EB18', borderColor: '#2563EB' }]}
+                  >
+                    <Ionicons name="pie-chart-outline" size={13} color="#2563EB" />
+                    <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#2563EB' }}>
+                      50% ({formatPKR(Math.round(currentBal / 2))})
                     </Text>
                   </TouchableOpacity>
                   {[1000, 5000, 10000, 50000].map(val => (
@@ -601,12 +972,14 @@ function AddTransactionModal({
               <View style={{ marginBottom: 14 }}>
                 <Text style={[s.fieldLabel, { color: theme.textSecondary }]}>PAYMENT SETTLEMENT CHANNEL</Text>
                 <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                  {(['Cash', 'Bank Transfer', 'Online POS', 'Cheque'] as const).map(ch => {
+                  {(['Cash', 'Bank Transfer', 'EasyPaisa', 'JazzCash', 'Online POS', 'Cheque'] as const).map(ch => {
                     const iconName =
                       ch === 'Cash'
                         ? 'cash-outline'
                         : ch === 'Bank Transfer'
                         ? 'business-outline'
+                        : ch === 'EasyPaisa' || ch === 'JazzCash'
+                        ? 'phone-portrait-outline'
                         : ch === 'Online POS'
                         ? 'card-outline'
                         : 'document-text-outline';
@@ -1126,12 +1499,14 @@ function CreditDetailModal({
   transactions,
   onClose,
   onAddTx,
+  onEditProfile,
 }: {
   visible: boolean;
   account: sqlite.CreditAccount | null;
   transactions: sqlite.CreditTransaction[];
   onClose: () => void;
-  onAddTx: () => void;
+  onAddTx: (initialType?: 'debit' | 'credit') => void;
+  onEditProfile: (account: sqlite.CreditAccount) => void;
 }) {
   const theme = useTheme();
   const [filterType, setFilterType] = useState<'all' | 'debit' | 'credit'>('all');
@@ -1155,6 +1530,9 @@ function CreditDetailModal({
     if (!account.customerPhone) return;
     Linking.openURL(`tel:${account.customerPhone}`).catch(() => Alert.alert('Error', 'Could not dial phone'));
   };
+
+  const isOverLimit = account.creditLimit && account.creditLimit > 0 && account.balance > account.creditLimit;
+  const availableCredit = account.creditLimit && account.creditLimit > 0 ? Math.max(0, account.creditLimit - account.balance) : null;
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
@@ -1186,6 +1564,34 @@ function CreditDetailModal({
           </View>
         </View>
 
+        {/* Customer Address & Credit Limit Info Bar */}
+        <View style={{ marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: isOverLimit ? '#EF444415' : theme.backgroundElement, borderWidth: 1, borderColor: isOverLimit ? '#EF4444' : theme.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View style={{ flex: 1, paddingRight: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="shield-checkmark-outline" size={15} color={isOverLimit ? '#DC2626' : theme.primary} />
+              <Text style={{ fontSize: 11, fontWeight: '800', color: isOverLimit ? '#DC2626' : theme.textSecondary, textTransform: 'uppercase' }}>
+                Store Credit Limit
+              </Text>
+            </View>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: theme.text, marginTop: 2 }}>
+              {account.creditLimit && account.creditLimit > 0 ? formatPKR(account.creditLimit) : 'No Credit Limit Set'}
+              {availableCredit !== null ? ` · Available: ${formatPKR(availableCredit)}` : ''}
+            </Text>
+            {account.customerAddress ? (
+              <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 3 }}>
+                📍 {account.customerAddress}
+              </Text>
+            ) : null}
+          </View>
+          <TouchableOpacity
+            onPress={() => onEditProfile(account)}
+            style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: theme.primaryLight, borderWidth: 1, borderColor: theme.primary + '30' }}
+            activeOpacity={0.7}
+          >
+            <Text style={{ fontSize: 11, fontWeight: '800', color: theme.primary }}>Edit Profile</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* 3 Executive Stat Cards */}
         <View style={[s.statsGrid, { margin: 16 }]}>
           <StatCard label="Total Credit Issued" value={formatPKR(account.totalDebit)} color={theme.danger} theme={theme} />
@@ -1198,16 +1604,27 @@ function CreditDetailModal({
           />
         </View>
 
-        {/* Primary Action Button */}
-        <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+        {/* Action Buttons: Receive Payment vs Give Credit */}
+        <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 12 }}>
           <TouchableOpacity
-            style={[s.primaryBtn, { backgroundColor: '#1A1A1A', paddingVertical: 13, borderRadius: 12 }]}
-            onPress={onAddTx}
+            style={[s.primaryBtn, { flex: 1.2, backgroundColor: '#16A34A', paddingVertical: 12, borderRadius: 12 }]}
+            onPress={() => onAddTx('credit')}
             activeOpacity={0.8}
           >
-            <Ionicons name="add-circle" size={18} color="#FFFFFF" />
-            <Text style={{ color: '#FFFFFF', fontWeight: '800', marginLeft: 8, fontSize: 14 }}>
-              Record Credit Transaction
+            <Ionicons name="arrow-down-circle" size={18} color="#FFFFFF" />
+            <Text style={{ color: '#FFFFFF', fontWeight: '800', marginLeft: 6, fontSize: 13.5 }}>
+              Receive Payment
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[s.primaryBtn, { flex: 1, backgroundColor: '#1A1A1A', paddingVertical: 12, borderRadius: 12 }]}
+            onPress={() => onAddTx('debit')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="arrow-up-circle" size={18} color="#FFFFFF" />
+            <Text style={{ color: '#FFFFFF', fontWeight: '800', marginLeft: 6, fontSize: 13.5 }}>
+              Give Udhar (Debit)
             </Text>
           </TouchableOpacity>
         </View>
@@ -1288,11 +1705,12 @@ export default function UdharScreen() {
 
   const showInstallments = INSTALLMENT_CATEGORIES.has(categoryId);
 
-  const [tab, setTab] = useState<'udhar' | 'installments'>('udhar');
+  const [tab, setTab] = useState<'udhar' | 'aging' | 'installments'>('udhar');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'cleared'>('all');
+  const [agingBucketFilter, setAgingBucketFilter] = useState<'all' | '0-30' | '31-60' | '61-90' | '90+'>('all');
 
   // Customer Credit state
   const [accounts, setAccounts] = useState<sqlite.CreditAccount[]>([]);
@@ -1301,7 +1719,21 @@ export default function UdharScreen() {
   const [transactions, setTransactions] = useState<sqlite.CreditTransaction[]>([]);
   const [creditDetailVisible, setCreditDetailVisible] = useState(false);
   const [addCustomerVisible, setAddCustomerVisible] = useState(false);
+  const [editCustomerVisible, setEditCustomerVisible] = useState(false);
+  const [accountToEdit, setAccountToEdit] = useState<sqlite.CreditAccount | null>(null);
   const [txModalVisible, setTxModalVisible] = useState(false);
+  const [txInitialType, setTxInitialType] = useState<'debit' | 'credit'>('credit');
+
+  // Payment Recovery Receipt Modal state
+  const [paymentReceiptVisible, setPaymentReceiptVisible] = useState(false);
+  const [paymentReceiptData, setPaymentReceiptData] = useState<{
+    customerName: string;
+    customerPhone?: string;
+    amountPaid: number;
+    remainingBalance: number;
+    channel: string;
+    receiptNo: string;
+  } | null>(null);
 
   // Installment state
   const [installments, setInstallments] = useState<sqlite.InstallmentAccount[]>([]);
@@ -1340,6 +1772,12 @@ export default function UdharScreen() {
     setCreditDetailVisible(true);
   };
 
+  const handleOpenReceivePayment = (acc: sqlite.CreditAccount) => {
+    setSelectedAccount(acc);
+    setTxInitialType('credit');
+    setTxModalVisible(true);
+  };
+
   const openInstallmentDetail = async (inst: sqlite.InstallmentAccount) => {
     setSelectedInstallment(inst);
     setInstallmentPayments(await sqlite.getInstallmentPayments(inst.id));
@@ -1358,7 +1796,46 @@ export default function UdharScreen() {
     if (refreshed) setSelectedInstallment(refreshed);
   };
 
-  // Filter accounts
+  // Aging Analysis Calculations
+  const agingData = useMemo(() => {
+    const debtors = accounts.filter(a => a.balance > 0);
+    const now = Date.now();
+    const withDays = debtors.map(a => {
+      const txDate = a.lastTransactionAt ? new Date(a.lastTransactionAt).getTime() : now;
+      const days = Math.max(0, Math.floor((now - txDate) / (1000 * 60 * 60 * 24)));
+      return { ...a, overdueDays: days };
+    });
+
+    const b0_30 = withDays.filter(a => a.overdueDays <= 30);
+    const b31_60 = withDays.filter(a => a.overdueDays > 30 && a.overdueDays <= 60);
+    const b61_90 = withDays.filter(a => a.overdueDays > 60 && a.overdueDays <= 90);
+    const b90plus = withDays.filter(a => a.overdueDays > 90);
+
+    const sum = (arr: typeof withDays) => arr.reduce((acc, curr) => acc + curr.balance, 0);
+
+    return {
+      all: withDays,
+      b0_30: { items: b0_30, total: sum(b0_30), count: b0_30.length },
+      b31_60: { items: b31_60, total: sum(b31_60), count: b31_60.length },
+      b61_90: { items: b61_90, total: sum(b61_90), count: b61_90.length },
+      b90plus: { items: b90plus, total: sum(b90plus), count: b90plus.length },
+      totalOverdueAmount: sum(withDays),
+    };
+  }, [accounts]);
+
+  const filteredAgingDebtors = useMemo(() => {
+    let list = agingData.all;
+    if (agingBucketFilter === '0-30') list = agingData.b0_30.items;
+    else if (agingBucketFilter === '31-60') list = agingData.b31_60.items;
+    else if (agingBucketFilter === '61-90') list = agingData.b61_90.items;
+    else if (agingBucketFilter === '90+') list = agingData.b90plus.items;
+
+    if (!search.trim()) return list;
+    const q = search.toLowerCase();
+    return list.filter(a => a.customerName.toLowerCase().includes(q) || a.customerPhone.includes(q));
+  }, [agingData, agingBucketFilter, search]);
+
+  // Filter accounts for Customer Credit tab
   const filteredAccounts = useMemo(() => {
     return accounts.filter(a => {
       const q = search.toLowerCase();
@@ -1394,16 +1871,16 @@ export default function UdharScreen() {
 
   return (
     <ScreenWrapper
-      title="Customer Credit Ledger"
+      title="Customer Credit & Khata"
       headerRight={
         <TouchableOpacity
           style={[s.headerActionBtn, { backgroundColor: '#1A1A1A' }]}
-          onPress={() => (tab === 'udhar' ? setAddCustomerVisible(true) : setNewInstVisible(true))}
+          onPress={() => (tab === 'installments' ? setNewInstVisible(true) : setAddCustomerVisible(true))}
           activeOpacity={0.8}
         >
-          <Ionicons name="person-add-outline" size={15} color="#FFFFFF" />
+          <Ionicons name={tab === 'installments' ? 'calendar-outline' : 'person-add-outline'} size={15} color="#FFFFFF" />
           <Text style={s.headerActionBtnText}>
-            {tab === 'udhar' ? 'Open Credit Account' : 'New Installment Plan'}
+            {tab === 'installments' ? 'New Installment Plan' : 'Open Credit Account'}
           </Text>
         </TouchableOpacity>
       }
@@ -1411,16 +1888,61 @@ export default function UdharScreen() {
       {/* ─── Screen Header Title Banner ─────────────────────────────────── */}
       <View style={[s.header, { backgroundColor: theme.backgroundElement, borderBottomColor: theme.border }]}>
         <View>
-          <Text style={[s.headerTitle, { color: theme.text }]}>Customer Credit Ledger</Text>
+          <Text style={[s.headerTitle, { color: theme.text }]}>
+            {tab === 'aging' ? 'Aging & Recovery Report' : 'Customer Credit Ledger'}
+          </Text>
           <Text style={[s.headerSub, { color: theme.textSecondary }]}>
             {tab === 'udhar'
-              ? `${accounts.length} active credit accounts · ${formatPKR(totalOutstanding)} total outstanding receivables`
+              ? `${accounts.length} active credit accounts · ${formatPKR(totalOutstanding)} total receivables`
+              : tab === 'aging'
+              ? `${agingData.all.length} pending balances · ${formatPKR(agingData.totalOverdueAmount)} total debt tracked by age`
               : `${installments.length} installment plans · ${overdueCount > 0 ? `${overdueCount} overdue` : 'all active accounts current'}`}
           </Text>
         </View>
       </View>
 
-      {/* ─── Summary Receivables Banner ─────────────────────────────────── */}
+      {/* ─── Navigation Tabs Bar (Accounts | Aging Report | Installments) ─── */}
+      <View style={[s.tabBarContainer, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+        <TouchableOpacity
+          onPress={() => { setTab('udhar'); setSearch(''); }}
+          style={[s.tabBarBtn, tab === 'udhar' && { backgroundColor: '#C5A880' }]}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="wallet-outline" size={15} color={tab === 'udhar' ? '#16171B' : theme.textSecondary} />
+          <Text style={[s.tabBarBtnText, { color: tab === 'udhar' ? '#16171B' : theme.textSecondary }]}>
+            Credit Accounts ({accounts.length})
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => { setTab('aging'); setSearch(''); }}
+          style={[s.tabBarBtn, tab === 'aging' && { backgroundColor: '#C5A880' }]}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="time-outline" size={15} color={tab === 'aging' ? '#16171B' : theme.textSecondary} />
+          <Text style={[s.tabBarBtnText, { color: tab === 'aging' ? '#16171B' : theme.textSecondary }]}>
+            Aging Report ({agingData.all.length})
+          </Text>
+          {agingData.b90plus.count > 0 && (
+            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#EF4444', marginLeft: 2 }} />
+          )}
+        </TouchableOpacity>
+
+        {showInstallments && (
+          <TouchableOpacity
+            onPress={() => { setTab('installments'); setSearch(''); }}
+            style={[s.tabBarBtn, tab === 'installments' && { backgroundColor: '#C5A880' }]}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="calendar-outline" size={15} color={tab === 'installments' ? '#16171B' : theme.textSecondary} />
+            <Text style={[s.tabBarBtnText, { color: tab === 'installments' ? '#16171B' : theme.textSecondary }]}>
+              Installments ({installments.length})
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* ─── Summary Receivables Banner (Udhar Tab) ─────────────────────── */}
       {tab === 'udhar' && totalOutstanding > 0 && (
         <View style={[s.banner, { backgroundColor: '#EF444412', borderColor: '#EF444435' }]}>
           <Ionicons name="alert-circle" size={18} color="#DC2626" />
@@ -1431,6 +1953,111 @@ export default function UdharScreen() {
             <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 1 }}>
               {pendingAccountsCount} customers currently owe credit balances
             </Text>
+          </View>
+        </View>
+      )}
+
+      {/* ─── Aging Report Summary 4-Cards Grid ───────────────────────────── */}
+      {tab === 'aging' && (
+        <View style={{ marginHorizontal: 16, marginTop: 12 }}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {/* 0-30 Days */}
+            <TouchableOpacity
+              onPress={() => setAgingBucketFilter(agingBucketFilter === '0-30' ? 'all' : '0-30')}
+              style={[
+                s.agingStatCard,
+                {
+                  backgroundColor: agingBucketFilter === '0-30' ? '#10B98125' : '#10B98110',
+                  borderColor: agingBucketFilter === '0-30' ? '#10B981' : '#10B98135',
+                },
+              ]}
+              activeOpacity={0.8}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: '#10B981' }}>0–30 DAYS</Text>
+                <View style={[s.agingStatBadge, { backgroundColor: '#10B98125' }]}>
+                  <Text style={{ fontSize: 10, fontWeight: '900', color: '#10B981' }}>{agingData.b0_30.count}</Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: 14, fontWeight: '900', color: '#10B981', marginTop: 4 }}>
+                {formatPKR(agingData.b0_30.total)}
+              </Text>
+              <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>Current Cycle</Text>
+            </TouchableOpacity>
+
+            {/* 31-60 Days */}
+            <TouchableOpacity
+              onPress={() => setAgingBucketFilter(agingBucketFilter === '31-60' ? 'all' : '31-60')}
+              style={[
+                s.agingStatCard,
+                {
+                  backgroundColor: agingBucketFilter === '31-60' ? '#F59E0B25' : '#F59E0B10',
+                  borderColor: agingBucketFilter === '31-60' ? '#F59E0B' : '#F59E0B35',
+                },
+              ]}
+              activeOpacity={0.8}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: '#F59E0B' }}>31–60 DAYS</Text>
+                <View style={[s.agingStatBadge, { backgroundColor: '#F59E0B25' }]}>
+                  <Text style={{ fontSize: 10, fontWeight: '900', color: '#F59E0B' }}>{agingData.b31_60.count}</Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: 14, fontWeight: '900', color: '#F59E0B', marginTop: 4 }}>
+                {formatPKR(agingData.b31_60.total)}
+              </Text>
+              <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>Follow-up Due</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+            {/* 61-90 Days */}
+            <TouchableOpacity
+              onPress={() => setAgingBucketFilter(agingBucketFilter === '61-90' ? 'all' : '61-90')}
+              style={[
+                s.agingStatCard,
+                {
+                  backgroundColor: agingBucketFilter === '61-90' ? '#F9731625' : '#F9731610',
+                  borderColor: agingBucketFilter === '61-90' ? '#F97316' : '#F9731635',
+                },
+              ]}
+              activeOpacity={0.8}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: '#F97316' }}>61–90 DAYS</Text>
+                <View style={[s.agingStatBadge, { backgroundColor: '#F9731625' }]}>
+                  <Text style={{ fontSize: 10, fontWeight: '900', color: '#F97316' }}>{agingData.b61_90.count}</Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: 14, fontWeight: '900', color: '#F97316', marginTop: 4 }}>
+                {formatPKR(agingData.b61_90.total)}
+              </Text>
+              <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>Overdue Alert</Text>
+            </TouchableOpacity>
+
+            {/* 90+ Days */}
+            <TouchableOpacity
+              onPress={() => setAgingBucketFilter(agingBucketFilter === '90+' ? 'all' : '90+')}
+              style={[
+                s.agingStatCard,
+                {
+                  backgroundColor: agingBucketFilter === '90+' ? '#EF444425' : '#EF444410',
+                  borderColor: agingBucketFilter === '90+' ? '#EF4444' : '#EF444435',
+                },
+              ]}
+              activeOpacity={0.8}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: '#EF4444' }}>90+ DAYS</Text>
+                <View style={[s.agingStatBadge, { backgroundColor: '#EF444425' }]}>
+                  <Text style={{ fontSize: 10, fontWeight: '900', color: '#EF4444' }}>{agingData.b90plus.count}</Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: 14, fontWeight: '900', color: '#EF4444', marginTop: 4 }}>
+                {formatPKR(agingData.b90plus.total)}
+              </Text>
+              <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>High Risk / Critical</Text>
+            </TouchableOpacity>
           </View>
         </View>
       )}
@@ -1453,40 +2080,19 @@ export default function UdharScreen() {
         </View>
       )}
 
-      {/* ─── Navigation Tabs (English & Clean) ───────────────────────────── */}
-      {showInstallments && (
-        <View style={[s.tabBarContainer, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
-          <TouchableOpacity
-            onPress={() => { setTab('udhar'); setSearch(''); }}
-            style={[s.tabBarBtn, tab === 'udhar' && { backgroundColor: '#C5A880' }]}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="wallet-outline" size={16} color={tab === 'udhar' ? '#16171B' : theme.textSecondary} />
-            <Text style={[s.tabBarBtnText, { color: tab === 'udhar' ? '#16171B' : theme.textSecondary }]}>
-              Credit Accounts ({accounts.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => { setTab('installments'); setSearch(''); }}
-            style={[s.tabBarBtn, tab === 'installments' && { backgroundColor: '#C5A880' }]}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="calendar-outline" size={16} color={tab === 'installments' ? '#16171B' : theme.textSecondary} />
-            <Text style={[s.tabBarBtnText, { color: tab === 'installments' ? '#16171B' : theme.textSecondary }]}>
-              Installment Plans ({installments.length})
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* ─── Search & Filter Bar ────────────────────────────────────────── */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 12, gap: 10 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 12, marginBottom: 10, gap: 10 }}>
         <View style={[s.searchRow, { flex: 1, backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
           <Ionicons name="search" size={15} color={theme.textSecondary} />
           <TextInput
             style={[s.searchInput, { color: theme.text }]}
-            placeholder={tab === 'udhar' ? 'Search credit customer by name or phone…' : 'Search by name, phone, product…'}
+            placeholder={
+              tab === 'udhar'
+                ? 'Search customer by name or phone…'
+                : tab === 'aging'
+                ? 'Search overdue customer…'
+                : 'Search by name, phone, product…'
+            }
             placeholderTextColor={theme.textSecondary + '80'}
             value={search}
             onChangeText={setSearch}
@@ -1513,9 +2119,18 @@ export default function UdharScreen() {
             ))}
           </View>
         )}
+
+        {tab === 'aging' && agingBucketFilter !== 'all' && (
+          <TouchableOpacity
+            onPress={() => setAgingBucketFilter('all')}
+            style={[s.filterBtn, { backgroundColor: '#C5A88020', borderWidth: 1, borderColor: '#C5A880' }]}
+          >
+            <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#C5A880' }}>Clear Filter</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* ─── Accounts List ──────────────────────────────────────────────── */}
+      {/* ─── Scrollable List Content ────────────────────────────────────── */}
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={theme.primary} />}
@@ -1532,13 +2147,15 @@ export default function UdharScreen() {
             filteredAccounts.map(acc => {
               const hasBalance = acc.balance > 0;
               const hasAdvance = acc.balance < 0;
+              const isOverLimit = !!(acc.creditLimit && acc.creditLimit > 0 && acc.balance > acc.creditLimit);
+
               return (
                 <TouchableOpacity key={acc.id} onPress={() => openCreditDetail(acc)} activeOpacity={0.8}>
                   <Card
                     style={[
                       s.listCard,
                       {
-                        borderColor: hasBalance ? '#EF444435' : theme.border,
+                        borderColor: isOverLimit ? '#DC2626' : hasBalance ? '#EF444435' : theme.border,
                         backgroundColor: theme.backgroundElement,
                       },
                     ]}
@@ -1549,18 +2166,41 @@ export default function UdharScreen() {
                       </Text>
                     </View>
                     <View style={{ flex: 1, marginLeft: 12 }}>
-                      <Text style={{ color: theme.text, fontWeight: '700', fontSize: 15 }}>
-                        {acc.customerName}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <Text style={{ color: theme.text, fontWeight: '700', fontSize: 15 }}>
+                          {acc.customerName}
+                        </Text>
+                        {isOverLimit && (
+                          <View style={{ backgroundColor: '#DC262615', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#DC262640' }}>
+                            <Text style={{ fontSize: 9.5, fontWeight: '900', color: '#DC2626' }}>OVER LIMIT</Text>
+                          </View>
+                        )}
+                      </View>
+
                       {acc.customerPhone ? (
                         <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 1 }}>
                           {acc.customerPhone}
                         </Text>
                       ) : null}
-                      <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 2 }}>
-                        Last activity: {timeAgo(acc.lastTransactionAt)}
-                      </Text>
+
+                      {acc.customerAddress ? (
+                        <Text style={{ color: theme.textSecondary + '95', fontSize: 11, marginTop: 1 }} numberOfLines={1}>
+                          📍 {acc.customerAddress}
+                        </Text>
+                      ) : null}
+
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                        <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+                          Active: {timeAgo(acc.lastTransactionAt)}
+                        </Text>
+                        {acc.creditLimit && acc.creditLimit > 0 ? (
+                          <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+                            · Limit: {formatPKR(acc.creditLimit)}
+                          </Text>
+                        ) : null}
+                      </View>
                     </View>
+
                     <View style={{ alignItems: 'flex-end', gap: 6 }}>
                       <Text
                         style={{
@@ -1595,17 +2235,15 @@ export default function UdharScreen() {
                         </View>
 
                         <TouchableOpacity
-                          onPress={async (e) => {
+                          onPress={(e) => {
                             e.stopPropagation();
-                            setSelectedAccount(acc);
-                            setTransactions(await sqlite.getCreditTransactions(acc.id));
-                            setTxModalVisible(true);
+                            handleOpenReceivePayment(acc);
                           }}
-                          style={[s.quickRecordBtn, { backgroundColor: theme.primaryLight, borderColor: theme.primary + '40' }]}
+                          style={[s.quickRecordBtn, { backgroundColor: '#16A34A15', borderColor: '#16A34A40' }]}
                           activeOpacity={0.7}
                         >
-                          <Ionicons name="add" size={12} color={theme.primary} />
-                          <Text style={{ fontSize: 10.5, fontWeight: '800', color: theme.primary }}>Record</Text>
+                          <Ionicons name="arrow-down" size={12} color="#16A34A" />
+                          <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#16A34A' }}>Collect</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -1614,7 +2252,157 @@ export default function UdharScreen() {
               );
             })
           )
+        ) : tab === 'aging' ? (
+          /* ─── Aging Report Debtor View ───────────────────────────────── */
+          filteredAgingDebtors.length === 0 ? (
+            <EmptyState
+              icon="checkmark-circle-outline"
+              text={
+                agingBucketFilter === 'all'
+                  ? 'All accounts are cleared! No outstanding receivables found.'
+                  : `No accounts in the ${agingBucketFilter} bucket match your search.`
+              }
+              theme={theme}
+            />
+          ) : (
+            filteredAgingDebtors.map(debtor => {
+              const days = debtor.overdueDays;
+              const bucketColor = days <= 30 ? '#10B981' : days <= 60 ? '#F59E0B' : days <= 90 ? '#F97316' : '#EF4444';
+              const bucketLabel = days <= 30 ? '0–30 Days' : days <= 60 ? '31–60 Days' : days <= 90 ? '61–90 Days' : '90+ Days Critical';
+              const isOverLimit = !!(debtor.creditLimit && debtor.creditLimit > 0 && debtor.balance > debtor.creditLimit);
+
+              return (
+                <Card
+                  key={debtor.id}
+                  style={[
+                    s.agingCard,
+                    {
+                      backgroundColor: theme.backgroundElement,
+                      borderColor: days > 60 ? bucketColor + '50' : theme.border,
+                    },
+                  ]}
+                >
+                  {/* Card Top Row */}
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                      <View style={[s.avatar, { backgroundColor: bucketColor + '18' }]}>
+                        <Text style={{ color: bucketColor, fontWeight: '900', fontSize: 15 }}>
+                          {debtor.customerName.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '800', color: theme.text }}>
+                          {debtor.customerName}
+                        </Text>
+                        {debtor.customerPhone ? (
+                          <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 1 }}>
+                            📞 {debtor.customerPhone}
+                          </Text>
+                        ) : null}
+                        {debtor.customerAddress ? (
+                          <Text style={{ fontSize: 11, color: theme.textSecondary + '95', marginTop: 1 }} numberOfLines={1}>
+                            📍 {debtor.customerAddress}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    {/* Overdue Badge */}
+                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                      <View style={[s.agingBadge, { backgroundColor: bucketColor + '18', borderColor: bucketColor + '40' }]}>
+                        <Ionicons name="time" size={11} color={bucketColor} />
+                        <Text style={{ fontSize: 10.5, fontWeight: '900', color: bucketColor }}>
+                          {days === 0 ? 'Today' : `${days} Days Pending`}
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 10, color: theme.textSecondary, fontWeight: '600' }}>
+                        {bucketLabel}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Financial Balance & Limit Banner */}
+                  <View
+                    style={[
+                      s.agingBalanceRow,
+                      {
+                        backgroundColor: theme.background,
+                        borderColor: theme.border,
+                      },
+                    ]}
+                  >
+                    <View>
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: theme.textSecondary, letterSpacing: 0.5 }}>
+                        OUTSTANDING UDHAR DUE
+                      </Text>
+                      <Text style={{ fontSize: 18, fontWeight: '900', color: '#DC2626', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', marginTop: 1 }}>
+                        {formatPKR(debtor.balance)}
+                      </Text>
+                    </View>
+
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: theme.textSecondary }}>CREDIT LIMIT</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text, marginTop: 1 }}>
+                        {debtor.creditLimit && debtor.creditLimit > 0 ? formatPKR(debtor.creditLimit) : 'No Limit'}
+                      </Text>
+                      {isOverLimit && (
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: '#DC2626' }}>
+                          Exceeded by {formatPKR(debtor.balance - (debtor.creditLimit || 0))}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+
+                  {/* Action Buttons Row */}
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                    {/* WhatsApp Reminder Button */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (!debtor.customerPhone) {
+                          Alert.alert('Phone Required', 'No mobile number recorded for this customer.');
+                          return;
+                        }
+                        openWhatsAppAgingReminder(
+                          user || { businessName: 'Our Shop' },
+                          debtor.customerName,
+                          debtor.customerPhone,
+                          debtor.balance,
+                          days
+                        );
+                      }}
+                      style={[s.agingActionBtn, { backgroundColor: '#10B981', flex: 1.2 }]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="logo-whatsapp" size={14} color="#FFFFFF" />
+                      <Text style={s.agingActionBtnText}>Send Reminder</Text>
+                    </TouchableOpacity>
+
+                    {/* Receive Payment Button */}
+                    <TouchableOpacity
+                      onPress={() => handleOpenReceivePayment(debtor)}
+                      style={[s.agingActionBtn, { backgroundColor: '#C5A880', flex: 1.2 }]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="card-outline" size={14} color="#16171B" />
+                      <Text style={[s.agingActionBtnText, { color: '#16171B' }]}>Collect Cash</Text>
+                    </TouchableOpacity>
+
+                    {/* View Ledger Button */}
+                    <TouchableOpacity
+                      onPress={() => openCreditDetail(debtor)}
+                      style={[s.agingActionBtn, { backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border, flex: 0.8 }]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="receipt-outline" size={14} color={theme.text} />
+                      <Text style={[s.agingActionBtnText, { color: theme.text }]}>Ledger</Text>
+                    </TouchableOpacity>
+                  </View>
+                </Card>
+              );
+            })
+          )
         ) : (
+          /* ─── Installments View ───────────────────────────────────────── */
           filteredInstallments.length === 0 ? (
             <EmptyState
               icon="calendar-outline"
@@ -1683,12 +2471,32 @@ export default function UdharScreen() {
         onSave={load}
       />
 
+      <EditCustomerProfileModal
+        visible={editCustomerVisible}
+        account={accountToEdit}
+        onClose={() => { setEditCustomerVisible(false); setAccountToEdit(null); }}
+        onSave={async () => {
+          await load();
+          if (selectedAccount && accountToEdit && selectedAccount.id === accountToEdit.id) {
+            const updated = await sqlite.getCreditAccount(selectedAccount.id);
+            if (updated) setSelectedAccount(updated);
+          }
+        }}
+      />
+
       <CreditDetailModal
         visible={creditDetailVisible}
         account={selectedAccount}
         transactions={transactions}
         onClose={() => setCreditDetailVisible(false)}
-        onAddTx={() => setTxModalVisible(true)}
+        onAddTx={(type) => {
+          setTxInitialType(type || 'credit');
+          setTxModalVisible(true);
+        }}
+        onEditProfile={(acc) => {
+          setAccountToEdit(acc);
+          setEditCustomerVisible(true);
+        }}
       />
 
       <AddTransactionModal
@@ -1696,6 +2504,7 @@ export default function UdharScreen() {
         account={selectedAccount}
         products={products}
         userId={userId}
+        initialType={txInitialType}
         onClose={() => setTxModalVisible(false)}
         onSave={async () => {
           await load();
@@ -1707,6 +2516,20 @@ export default function UdharScreen() {
             if (updated) setSelectedAccount(updated);
             setTransactions(txs);
           }
+        }}
+        onPaymentCompleted={(pData) => {
+          setPaymentReceiptData(pData);
+          setPaymentReceiptVisible(true);
+        }}
+      />
+
+      <PaymentRecoveryReceiptModal
+        visible={paymentReceiptVisible}
+        data={paymentReceiptData}
+        business={user}
+        onClose={() => {
+          setPaymentReceiptVisible(false);
+          setPaymentReceiptData(null);
         }}
       />
 
@@ -2269,5 +3092,54 @@ const s = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     marginBottom: 12,
+  },
+  agingStatCard: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  agingStatBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  agingCard: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  agingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  agingBalanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 12,
+  },
+  agingActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  agingActionBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 12,
   },
 });

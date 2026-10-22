@@ -284,9 +284,19 @@ export function ReceiptModal({ visible, invoice, items, onClose, onExchangeRetur
           {/* Header */}
           <View style={styles.header}>
             <View>
-              <Text style={[styles.title, { color: theme.text }]}>POS Terminal Control</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={[styles.title, { color: theme.text }]}>POS Terminal Control</Text>
+                {((invoice as any).paymentMethod === 'credit' || (invoice as any).isCreditSale) && (
+                  <View style={{ backgroundColor: '#EF444420', borderColor: '#EF4444', borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#DC2626' }}>
+                      ON CREDIT / UNPAID
+                    </Text>
+                  </View>
+                )}
+              </View>
               <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
                 Order No: #{sqlite.formatOrderNumber(invoice.id, invoice.createdAt)}
+                {(invoice as any).customerBalance !== undefined ? ` · Khata Balance: PKR ${Number((invoice as any).customerBalance).toLocaleString('en-IN')}` : ''}
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} style={[styles.closeBtn, { backgroundColor: theme.backgroundSelected }]}>

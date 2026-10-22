@@ -262,6 +262,13 @@ export async function getWhatsAppInvoiceMessage(
   const orderNumber = formatOrderNumber(invoice.id, invoice.createdAt);
   const custPhoneLine = invoice.customerPhone ? `👤 *Customer:* ${custName} (${invoice.customerPhone})\n` : `👤 *Customer:* ${custName}\n`;
 
+  const isCredit = (invoice as any).paymentMethod === 'credit' || (invoice as any).isCreditSale;
+  const khataBalance = (invoice as any).customerBalance !== undefined ? (invoice as any).customerBalance : null;
+
+  const statusLine = isCredit
+    ? `💳 *Status:* ⚠️ Unpaid / On Credit (Udhar)\n` + (khataBalance !== null ? `💼 *Total Khata Balance:* *PKR ${Number(khataBalance).toLocaleString('en-IN')}*\n` : '')
+    : `💳 *Status:* Paid\n`;
+
   const message =
     `Assalam-o-Alaikum *${custName}*,\n\n` +
     `Thank you for shopping with us at *${bizName}*! 🙏\n\n` +
@@ -272,7 +279,7 @@ export async function getWhatsAppInvoiceMessage(
     custPhoneLine +
     `📅 *Date:* ${formattedDate}\n` +
     `💰 *Total Bill:* *${formattedTotal}*\n` +
-    `💳 *Status:* Paid\n` +
+    statusLine +
     `━━━━━━━━━━━━━━━━━━━━━\n\n` +
     `📄 *View & Download Official PDF Invoice:*\n` +
     `👉 ${url}\n\n` +
@@ -483,5 +490,169 @@ export async function openWhatsAppReturnExchange(
     }
   }
 }
+
+/**
+ * Generates WhatsApp Payment Recovery Receipt message
+ */
+export function getWhatsAppPaymentReceiptMessage(
+  business: Partial<UserSession>,
+  customerName: string,
+  amountPaid: number,
+  remainingBalance: number,
+  channel: string = 'Cash',
+  receiptNo?: string
+): { message: string } {
+  const bizName = business.businessName || 'Our Shop';
+  const bizPhone = business.phone ? `\n📞 Support / Inquiry: ${business.phone}` : '';
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' });
+  const timeStr = now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+  const slipId = receiptNo || 'REC_' + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+  const message =
+    `Assalam-o-Alaikum *${customerName || 'Valued Customer'}*,\n\n` +
+    `Payment receipt from *${bizName}*:\n\n` +
+    `🧾 *PAYMENT RECOVERY RECEIPT*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🏪 *Shop / Business:* ${bizName}\n` +
+    `📋 *Receipt #:* #${slipId}\n` +
+    `📅 *Date:* ${dateStr} · ${timeStr}\n` +
+    `💳 *Payment Mode:* ${channel}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `✅ *Amount Received:* *PKR ${amountPaid.toLocaleString('en-IN')}*\n` +
+    `💼 *Remaining Khata Balance:* *PKR ${Math.max(0, remainingBalance).toLocaleString('en-IN')}*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `Thank you for your prompt settlement! JazakAllah Khair. 🙏\n` +
+    `*${bizName}*` +
+    bizPhone + `\n\n` +
+    `_Digitally verified via Vaypar POS_`;
+
+  return { message };
+}
+
+/**
+ * Opens WhatsApp for Payment Recovery Receipt
+ */
+export async function openWhatsAppPaymentReceipt(
+  business: Partial<UserSession>,
+  customerName: string,
+  customerPhone: string,
+  amountPaid: number,
+  remainingBalance: number,
+  channel: string = 'Cash',
+  receiptNo?: string,
+  target: 'web' | 'app' = 'web'
+): Promise<void> {
+  const formattedPhone = formatCustomerPhoneForWhatsApp(customerPhone || '');
+  if (!formattedPhone || formattedPhone.length < 10) {
+    Alert.alert('Customer Phone Required', 'Customer ka valid phone number enter karein (e.g. 03001234567).');
+    return;
+  }
+
+  const { message } = getWhatsAppPaymentReceiptMessage(business, customerName, amountPaid, remainingBalance, channel, receiptNo);
+  const encoded = encodeURIComponent(message);
+  const webChatUrl = `https://web.whatsapp.com/send/?phone=${formattedPhone}&text=${encoded}`;
+  const appProtocolUrl = `whatsapp://send?phone=${formattedPhone}&text=${encoded}`;
+
+  if (Platform.OS === 'web') {
+    if (target === 'app') {
+      try {
+        window.location.href = appProtocolUrl;
+      } catch {
+        window.open(webChatUrl, '_blank');
+      }
+    } else {
+      window.open(webChatUrl, '_blank');
+    }
+  } else {
+    try {
+      const canOpen = await Linking.canOpenURL(appProtocolUrl);
+      if (canOpen) {
+        await Linking.openURL(appProtocolUrl);
+      } else {
+        await Linking.openURL(webChatUrl);
+      }
+    } catch {
+      await Linking.openURL(webChatUrl);
+    }
+  }
+}
+
+/**
+ * Generates WhatsApp Aging Debt Reminder message
+ */
+export function getWhatsAppAgingReminderMessage(
+  business: Partial<UserSession>,
+  customerName: string,
+  balance: number,
+  daysOverdue: number
+): { message: string } {
+  const bizName = business.businessName || 'Our Shop';
+  const bizPhone = business.phone ? `\n📞 Account / Payment Details: ${business.phone}` : '';
+
+  const message =
+    `Assalam-o-Alaikum *${customerName || 'Customer'}*,\n\n` +
+    `This is a respectful payment reminder regarding your credit ledger with *${bizName}*.\n\n` +
+    `⏳ *KHATA OVERDUE STATEMENT*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🏪 *Business:* ${bizName}\n` +
+    `👤 *Customer Name:* ${customerName}\n` +
+    `⌛ *Overdue Period:* *${daysOverdue} Days Pending*\n` +
+    `💰 *Outstanding Balance:* *PKR ${balance.toLocaleString('en-IN')}*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `Kindly arrange the settlement of your pending balance at your earliest convenience.\n` +
+    `Thank you for your cooperation! JazakAllah Khair. 🙏\n` +
+    `*${bizName}*` +
+    bizPhone;
+
+  return { message };
+}
+
+/**
+ * Opens WhatsApp for Aging Debt Reminder
+ */
+export async function openWhatsAppAgingReminder(
+  business: Partial<UserSession>,
+  customerName: string,
+  customerPhone: string,
+  balance: number,
+  daysOverdue: number,
+  target: 'web' | 'app' = 'web'
+): Promise<void> {
+  const formattedPhone = formatCustomerPhoneForWhatsApp(customerPhone || '');
+  if (!formattedPhone || formattedPhone.length < 10) {
+    Alert.alert('Phone Required', 'Customer ka valid phone number maujood nahi hai.');
+    return;
+  }
+
+  const { message } = getWhatsAppAgingReminderMessage(business, customerName, balance, daysOverdue);
+  const encoded = encodeURIComponent(message);
+  const webChatUrl = `https://web.whatsapp.com/send/?phone=${formattedPhone}&text=${encoded}`;
+  const appProtocolUrl = `whatsapp://send?phone=${formattedPhone}&text=${encoded}`;
+
+  if (Platform.OS === 'web') {
+    if (target === 'app') {
+      try {
+        window.location.href = appProtocolUrl;
+      } catch {
+        window.open(webChatUrl, '_blank');
+      }
+    } else {
+      window.open(webChatUrl, '_blank');
+    }
+  } else {
+    try {
+      const canOpen = await Linking.canOpenURL(appProtocolUrl);
+      if (canOpen) {
+        await Linking.openURL(appProtocolUrl);
+      } else {
+        await Linking.openURL(webChatUrl);
+      }
+    } catch {
+      await Linking.openURL(webChatUrl);
+    }
+  }
+}
+
 
 
