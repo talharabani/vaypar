@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, isSupabaseConfigured } from '../services/supabase';
 import * as sqlite from '../services/sqlite';
 import { runSync } from '../services/sync';
@@ -64,6 +65,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // 1. Check local demo session first
     const demoProfile = await sqlite.getUserProfileCombined('local_user');
     if (demoProfile) {
+      // Re-hydrate any cached AsyncStorage updates if available
+      try {
+        const cached = await AsyncStorage.getItem('@vaypar_active_business_local_business');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed.businessName) demoProfile.businessName = parsed.businessName;
+          if (parsed.phone) demoProfile.phone = parsed.phone;
+          if (parsed.address) demoProfile.address = parsed.address;
+          if (parsed.logoUri) demoProfile.logoUri = parsed.logoUri;
+        }
+      } catch {}
       set({ user: demoProfile as UserSession, isDemoMode: true, loading: false });
       return;
     }
@@ -114,6 +126,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             }
           }
           if (profile) {
+            // Re-hydrate any cached AsyncStorage updates if available
+            try {
+              const cached = await AsyncStorage.getItem(`@vaypar_active_business_${profile.businessId}`);
+              if (cached) {
+                const parsed = JSON.parse(cached);
+                if (parsed.businessName) profile.businessName = parsed.businessName;
+                if (parsed.phone) profile.phone = parsed.phone;
+                if (parsed.address) profile.address = parsed.address;
+                if (parsed.logoUri) profile.logoUri = parsed.logoUri;
+              }
+            } catch {}
             set({ user: profile as UserSession, isDemoMode: false });
             // Background non-blocking sync for cloud freshness
             runSync(uid).catch(() => {});
@@ -476,17 +499,48 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       lastUpdated: now,
     };
 
+    // 1. Save to SQLite businesses table
     await sqlite.upsertBusinessProfile(updatedBiz);
 
+    // 2. Also sync phone in users table
+    try {
+      const db = await sqlite.getDB();
+      await db.runAsync(
+        'UPDATE users SET phone = ?, synced = 0, lastUpdated = ? WHERE id = ?',
+        [phone, now, user.id]
+      );
+    } catch (e) {
+      console.warn('[useAuthStore] Could not update users phone:', e);
+    }
+
+    // 3. Bulletproof cache in AsyncStorage (guarantees survival across refreshes)
+    try {
+      await AsyncStorage.setItem(
+        `@vaypar_active_business_${user.businessId}`,
+        JSON.stringify(updatedBiz)
+      );
+      await AsyncStorage.setItem(
+        '@vaypar_active_user',
+        JSON.stringify({ ...user, businessName, phone, address, logoUri })
+      );
+    } catch (e) {
+      console.warn('[useAuthStore] AsyncStorage write failed:', e);
+    }
+
+    // 4. Push to Supabase if connected
     if (isSupabaseConfigured() && !get().isDemoMode) {
       try {
-        await supabase.from('businesses').update({
+        const { error } = await supabase.from('businesses').upsert({
+          id: user.businessId,
           business_name: businessName,
           phone,
           address,
           logo_uri: logoUri,
           last_updated: now
-        }).eq('id', user.businessId);
+        });
+        if (!error) {
+          await sqlite.markBusinessProfileSynced(user.businessId);
+        }
       } catch (err) {
         console.warn('[useAuthStore] Supabase profile update failed (sync-deferred):', err);
       }

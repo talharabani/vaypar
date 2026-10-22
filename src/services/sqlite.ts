@@ -80,6 +80,7 @@ export interface UserSessionCombined {
   businessName: string;
   address: string;
   logoUri: string;
+  businessCategory?: string;
   synced?: number;
   lastUpdated: string;
 }
@@ -704,13 +705,14 @@ export async function getUserProfileCombined(userId: string): Promise<UserSessio
     role: userResult.role,
     name: userResult.name,
     email: userResult.email,
-    phone: userResult.phone,
+    phone: bizResult?.phone || userResult.phone || '',
     salary: userResult.salary,
     joiningDate: userResult.joiningDate,
     status: userResult.status,
     businessName: bizResult?.businessName || 'My Business',
     address: bizResult?.address || '',
     logoUri: bizResult?.logoUri || '',
+    businessCategory: bizResult?.businessCategory || 'general',
     synced: userResult.synced,
     lastUpdated: userResult.lastUpdated
   };

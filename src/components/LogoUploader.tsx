@@ -56,12 +56,16 @@ export function LogoUploader({
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.85,
-        base64: false,
+        quality: 0.7,
+        base64: true,
       });
 
       if (!result.canceled && result.assets.length > 0) {
-        onChange(result.assets[0].uri);
+        const asset = result.assets[0];
+        const persistentUri = asset.base64
+          ? `data:image/jpeg;base64,${asset.base64}`
+          : asset.uri;
+        onChange(persistentUri);
       }
     } catch (err: any) {
       Alert.alert('Upload Error', err.message || 'Could not open image library.');

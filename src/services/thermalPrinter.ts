@@ -110,8 +110,9 @@ export function generateThermalReceipt(
   if (business.address) {
     addLine(business.address, COMMANDS.ALIGN_CENTER);
   }
-  if (business.phone) {
-    addLine(`Tel: ${business.phone}`, COMMANDS.ALIGN_CENTER);
+  const bizPhone = business.phone || (business as any).phone || '';
+  if (bizPhone && bizPhone.trim()) {
+    addLine(`Tel: ${bizPhone.trim()}`, COMMANDS.ALIGN_CENTER);
   }
   if (taxId) {
     addLine(`GST/NTN: ${taxId}`, COMMANDS.ALIGN_CENTER);
@@ -367,7 +368,7 @@ export function generateThermalSlipHTML(
           <!-- Business Header -->
           <div class="store-name">${business.businessName || business.name || 'MY BUSINESS'}</div>
           ${business.address ? `<div class="store-sub">${business.address}</div>` : ''}
-          ${business.phone ? `<div class="store-sub">Tel: ${business.phone}</div>` : ''}
+          ${(business.phone || (business as any).phone) ? `<div class="store-sub" style="font-weight: 600;">Tel: ${business.phone || (business as any).phone}</div>` : ''}
           ${taxId ? `<div class="store-tax">GST / NTN: ${taxId}</div>` : ''}
           
           <div class="divider-solid"></div>

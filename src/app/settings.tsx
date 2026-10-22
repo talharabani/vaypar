@@ -113,6 +113,18 @@ export default function SettingsScreen() {
   const [updating, setUpdating] = useState(false);
   const [updateSuccess, setUpdateSuccess] = useState(false);
 
+  // Sync profile inputs when user state hydrates or updates
+  useEffect(() => {
+    if (user) {
+      if (user.businessName) setBusinessName(user.businessName);
+      if (user.phone) setPhone(user.phone);
+      if (user.address) setAddress(user.address);
+      if (user.logoUri) setLogoUri(user.logoUri);
+      if (user.name) setOwnerName(user.name);
+      if (user.email) setBusinessEmail(user.email);
+    }
+  }, [user?.businessName, user?.phone, user?.address, user?.logoUri, user?.name, user?.email]);
+
   // Unsynced Counts State
   const [unsyncedCount, setUnsyncedCount] = useState({ products: 0, invoices: 0, expenses: 0 });
 

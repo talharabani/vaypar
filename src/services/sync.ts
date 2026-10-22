@@ -310,16 +310,24 @@ async function pullRemoteChanges(userId: string, businessId: string) {
     .single();
 
   if (bizData) {
-    await sqlite.upsertBusinessProfile({
-      id: businessId,
-      businessName: bizData.business_name || 'My Business',
-      phone: bizData.phone || '',
-      address: bizData.address || '',
-      logoUri: bizData.logo_uri || '',
-      businessCategory: bizData.business_category || 'general',
-      synced: 1,
-      lastUpdated: bizData.last_updated || nowStr,
-    });
+    const localBiz = await sqlite.getBusinessProfile(businessId);
+    // If local profile has pending changes (synced = 0), do not overwrite with remote
+    if (localBiz && (localBiz.synced ?? 0) === 0) {
+      console.log(`[Sync] Local business profile ${businessId} has pending local changes. Preserving local profile.`);
+    } else {
+      // Ensure local logo is never wiped if remote logo is empty string
+      const finalLogo = bizData.logo_uri || localBiz?.logoUri || '';
+      await sqlite.upsertBusinessProfile({
+        id: businessId,
+        businessName: bizData.business_name || localBiz?.businessName || 'My Business',
+        phone: bizData.phone || localBiz?.phone || '',
+        address: bizData.address || localBiz?.address || '',
+        logoUri: finalLogo,
+        businessCategory: bizData.business_category || localBiz?.businessCategory || 'general',
+        synced: 1,
+        lastUpdated: bizData.last_updated || nowStr,
+      });
+    }
   }
 
   // B. Pull Products
