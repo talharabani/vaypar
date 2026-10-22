@@ -1,11 +1,71 @@
 import { getDB, Product, Invoice, InvoiceItem } from './sqlite';
 import { UserSession } from '../store/useAuthStore';
 import { getCategoryById } from '../constants/businessCategories';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_STORAGE_KEY = '@vaypar_groq_api_key';
+const MODEL_STORAGE_KEY = '@vaypar_ai_model';
+
 // Fallback key reconstructed safely without plaintext token scanner triggers
 const FALLBACK_GROQ_KEY = ['gsk', '_rJY5y6ax4XsdXtSceuy6WGdyb3FYIVDF19PDDC28AVye8DMIAFRN'].join('');
-const DEFAULT_GROQ_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || FALLBACK_GROQ_KEY;
+export const DEFAULT_GROQ_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || FALLBACK_GROQ_KEY;
+
+export interface SupportedAIModel {
+  id: string;
+  name: string;
+  tag: string;
+  desc: string;
+}
+
+export const SUPPORTED_AI_MODELS: SupportedAIModel[] = [
+  {
+    id: 'qwen/qwen3.8-27b',
+    name: 'Qwen 3.8 27B',
+    tag: 'Recommended',
+    desc: 'Lightning fast, native Roman Urdu, Urdu & English copilot',
+  },
+  {
+    id: 'openai/gpt-oss-120b',
+    name: 'GPT OSS 120B',
+    tag: 'Deep Intel',
+    desc: 'High intelligence reasoning model for complex business strategy',
+  },
+  {
+    id: 'openai/gpt-oss-20b',
+    name: 'GPT OSS 20B',
+    tag: 'Fast Intel',
+    desc: 'Compact, efficient model for quick inventory lookups',
+  },
+];
+
+export async function getActiveGroqKey(): Promise<string> {
+  try {
+    const saved = await AsyncStorage.getItem(GROQ_STORAGE_KEY);
+    if (saved && saved.trim()) return saved.trim();
+  } catch {}
+  return DEFAULT_GROQ_KEY;
+}
+
+export async function saveActiveGroqKey(key: string): Promise<void> {
+  if (!key.trim()) {
+    await AsyncStorage.removeItem(GROQ_STORAGE_KEY);
+  } else {
+    await AsyncStorage.setItem(GROQ_STORAGE_KEY, key.trim());
+  }
+}
+
+export async function getSavedAIModel(): Promise<string> {
+  try {
+    const saved = await AsyncStorage.getItem(MODEL_STORAGE_KEY);
+    if (saved) return saved;
+  } catch {}
+  return 'qwen/qwen3.8-27b';
+}
+
+export async function saveAIModel(modelId: string): Promise<void> {
+  await AsyncStorage.setItem(MODEL_STORAGE_KEY, modelId);
+}
 
 export interface AIConversation {
   id: string;
@@ -341,14 +401,95 @@ ${marginSummary}
 }
 
 /**
+ * Generates an intelligent, accurate local response directly from SQLite store context
+ * Used when the user is offline or Groq API network is unreachable.
+ */
+export function generateOfflineAIResponse(userMessage: string, context: BusinessAIContextData): string {
+  const q = userMessage.toLowerCase();
+
+  // 1. Stock / Inventory inquiry
+  if (q.includes('stock') || q.includes('low') || q.includes('kam') || q.includes('maal') || q.includes('inventory') || q.includes('item') || q.includes('product')) {
+    let out = `📦 **Inventory & Stock Report for ${context.businessName}:**\n\n`;
+    out += `• **Total Catalog Products:** ${context.totalProductsCount} items\n`;
+    out += `• **Total Stock Units:** ${context.totalStockUnits} units in stock\n`;
+    out += `• **Estimated Stock Value:** PKR ${Math.round(context.inventoryValuation).toLocaleString()}\n\n`;
+
+    if (context.outOfStockItems.length > 0) {
+      out += `🚫 **Out of Stock (${context.outOfStockItems.length} items):**\n`;
+      context.outOfStockItems.slice(0, 8).forEach((i) => {
+        out += `• ${i.name} — PKR ${i.price.toLocaleString()}\n`;
+      });
+      out += '\n';
+    }
+
+    if (context.lowStockItems.length > 0) {
+      out += `⚠️ **Low Stock Alert (${context.lowStockItems.length} items):**\n`;
+      context.lowStockItems.slice(0, 8).forEach((i) => {
+        out += `• ${i.name}: ${i.quantity} left (alert threshold: ${i.threshold})\n`;
+      });
+    } else if (context.outOfStockItems.length === 0) {
+      out += `✅ Tamam stock bilkul healthy hai! Koi item low stock ya out of stock nahi hai.`;
+    }
+    return out;
+  }
+
+  // 2. Sales / Revenue inquiry
+  if (q.includes('sale') || q.includes('kamai') || q.includes('bikri') || q.includes('revenue') || q.includes('order') || q.includes('bill') || q.includes('aaj') || q.includes('total')) {
+    let out = `💰 **Sales & Revenue Report for ${context.businessName}:**\n\n`;
+    out += `• **Aaj Ki Total Sales:** PKR ${Math.round(context.recentSalesToday).toLocaleString()}\n`;
+    out += `• **All-Time Total Revenue:** PKR ${Math.round(context.totalSalesRevenue).toLocaleString()}\n`;
+    out += `• **Total Invoices / Orders:** ${context.totalInvoicesCount} orders\n`;
+    out += `• **Pending Udhar (Customer Balances):** PKR ${Math.round(context.pendingUdharBalance).toLocaleString()}\n\n`;
+
+    if (context.topSellingProducts.length > 0) {
+      out += `🔥 **Top Selling Items:**\n`;
+      context.topSellingProducts.slice(0, 5).forEach((p, idx) => {
+        out += `${idx + 1}. ${p.name} — ${p.totalQtySold} sold (PKR ${p.totalRevenue.toLocaleString()})\n`;
+      });
+    }
+    return out;
+  }
+
+  // 3. Profit / Margins inquiry
+  if (q.includes('profit') || q.includes('margin') || q.includes('munafa') || q.includes('faida') || q.includes('bachat')) {
+    if (context.highProfitMarginProducts.length === 0) {
+      return `💡 **Profit Margin Analysis:**\nAapne abhi products ki purchase/cost prices enter nahi ki hain. Products section mein purchase price daalne par yahan automatically highest profit items show honge.`;
+    }
+    let out = `📈 **Highest Profit Margin Products (${context.businessName}):**\n\n`;
+    context.highProfitMarginProducts.slice(0, 7).forEach((p, idx) => {
+      out += `${idx + 1}. **${p.name}** — ${p.marginPercent}% Margin (Cost: PKR ${p.purchasePrice} → Sale: PKR ${p.price})\n`;
+    });
+    return out;
+  }
+
+  // 4. Udhar / Credit inquiry
+  if (q.includes('udhar') || q.includes('khata') || q.includes('credit') || q.includes('dena') || q.includes('lena') || q.includes('wapsi')) {
+    return `📋 **Udhar / Khata Summary for ${context.businessName}:**\n\n• **Customer Pending Udhar:** PKR ${Math.round(context.pendingUdharBalance).toLocaleString()}\n\nAap "Udhar Khata" screen mein ja kar har customer ka hisab dekh sakte hain, payment receive kar sakte hain, aur one-click WhatsApp reminder bhej sakte hain.`;
+  }
+
+  // 5. POS / Printers / Slips inquiry
+  if (q.includes('print') || q.includes('slip') || q.includes('thermal') || q.includes('pos') || q.includes('order number') || q.includes('setting') || q.includes('receipt')) {
+    return `🖨️ **Vaypar POS & Slip Features:**\n\n1. **Thermal Printers:** 58mm compact aur 80mm standard Bluetooth/USB ESC/POS printers support hain.\n2. **Order Numbering:** Automatic format #ORD-YYYY-XXXX (e.g. #ORD-2026-0001). Naye saal aane par automatically #ORD-2027-0000 se restart hota hai.\n3. **Slip Format:** Store category (${context.categoryLabel}) ke mutabiq dynamic receipt banti hai. Top par store logo aur bottom par "Prepared by Vaypar" print hota hai.\n4. **Cloud Sync:** Supabase cloud sync Settings se configure hota hai.`;
+  }
+
+  // 6. Identity / General Help
+  return `Assalam o Alaikum! Main **Vaypar AI Assistant** hoon aapke business (**${context.businessName}**) ke liye.\n\nMain aapki in sab mamlaat mein madad karne ke liye tayyar hoon:\n• **Stock Status:** "Kam stock walay items dikhao" ya "Stock ki valuation kitni hai?"\n• **Sales Data:** "Aaj ki sale kitni hui?" ya "All-time revenue batao"\n• **Top Items:** "Sab se zyada bikne walay products kon se hain?"\n• **Profit & Margins:** "Highest profit items batao"\n• **Udhar / Khata:** "Customer udhar ka status kya hai?"\n• **POS Help:** "Thermal printer ya settings guide"\n\nAap Roman Urdu, Urdu, ya English mein koi bhi sawal pooch sakte hain!`;
+}
+
+/**
  * Sends conversation to Groq API and returns AI response
+ * Automatically cascades through fast models and falls back to local intelligence if offline.
  */
 export async function sendChatMessageToGroq(
   userMessage: string,
   history: AIMessage[],
   context: BusinessAIContextData,
-  apiKey = DEFAULT_GROQ_KEY
+  apiKey?: string,
+  preferredModel?: string
 ): Promise<string> {
+  const activeKey = (apiKey && apiKey.trim()) || (await getActiveGroqKey());
+  const chosenModel = preferredModel || (await getSavedAIModel());
+
   const systemPrompt = buildAISystemPrompt(context);
 
   const messagesPayload = [
@@ -360,51 +501,73 @@ export async function sendChatMessageToGroq(
     { role: 'user', content: userMessage },
   ];
 
-  const tryCallModel = async (modelName: string) => {
-    const res = await fetch(GROQ_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey.trim()}`,
-      },
-      body: JSON.stringify({
-        model: modelName,
-        messages: messagesPayload,
-        temperature: 0.4,
-        max_tokens: 1024,
-      }),
-    });
+  const tryCallModel = async (modelName: string): Promise<string> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 16000);
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Groq API error (${res.status}): ${errText}`);
+    try {
+      const res = await fetch(GROQ_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${activeKey.trim()}`,
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: messagesPayload,
+          temperature: 0.4,
+          max_completion_tokens: 1536,
+          reasoning_format: 'hidden',
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Groq API error (${res.status}): ${errText}`);
+      }
+
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content?.trim();
+      if (!content) {
+        throw new Error(`Model ${modelName} returned empty content`);
+      }
+      return content;
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error(`Model ${modelName} request timed out`);
+      }
+      throw err;
     }
-
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || 'No response generated.';
   };
 
-  try {
-    // Primary: OpenAI GPT-OSS 120B (High Intelligence & Accuracy)
-    return await tryCallModel('openai/gpt-oss-120b');
-  } catch (err: any) {
-    console.warn('[Vaypar AI] gpt-oss-120b failed, falling back to gpt-oss-20b:', err.message);
+  // Build model fallback cascade: start with chosenModel, then fallback candidates
+  const allModels = ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+  const modelChain = [chosenModel, ...allModels.filter((m) => m !== chosenModel)];
+
+  let lastError: any = null;
+  for (const model of modelChain) {
     try {
-      // Fallback 1: OpenAI GPT-OSS 20B (Fast & Efficient)
-      return await tryCallModel('openai/gpt-oss-20b');
-    } catch (fallbackErr: any) {
-      console.warn('[Vaypar AI] gpt-oss-20b failed, falling back to qwen3.8-27b:', fallbackErr.message);
-      try {
-        // Fallback 2: Qwen 3.8 27B
-        return await tryCallModel('qwen/qwen3.8-27b');
-      } catch (lastErr: any) {
-        console.error('[Vaypar AI] All AI models failed:', lastErr);
-        throw new Error(
-          lastErr.message?.includes('401')
-            ? 'Invalid Groq API Key. Please verify your key in Settings or .env.'
-            : (lastErr.message || 'Could not connect to Groq AI. Please check your internet connection.')
-        );
-      }
+      return await tryCallModel(model);
+    } catch (err: any) {
+      console.warn(`[Vaypar AI] Model ${model} call failed:`, err?.message || err);
+      lastError = err;
     }
   }
+
+  // If all online cloud attempts failed, fall back to smart local intelligence!
+  console.warn('[Vaypar AI] All cloud AI endpoints failed. Using local business intelligence.');
+  const offlineReply = generateOfflineAIResponse(userMessage, context);
+  if (offlineReply) {
+    return offlineReply;
+  }
+
+  throw new Error(
+    lastError?.message?.includes('401')
+      ? 'Invalid Groq API Key. Please verify your key in Settings or .env.'
+      : (lastError?.message || 'Could not connect to Groq AI. Please check your internet connection.')
+  );
 }

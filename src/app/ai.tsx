@@ -4,6 +4,7 @@ import {
   Alert,
   Dimensions,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -22,13 +23,29 @@ import {
   BusinessAIContextData,
   clearAllAIConversations,
   createAIConversation,
+  DEFAULT_GROQ_KEY,
   deleteAIConversation,
+  getActiveGroqKey,
   getAIConversations,
   getAIMessages,
   getBusinessAIContext,
+  getSavedAIModel,
+  saveActiveGroqKey,
+  saveAIModel,
   saveAIMessage,
   sendChatMessageToGroq,
+  SUPPORTED_AI_MODELS,
+  SupportedAIModel,
 } from '../services/aiService';
+
+const URDU_QUICK_PROMPTS = [
+  { label: '📊 Aaj Ki Sale', prompt: 'Aaj ki total sale aur revenue kitna hua hai?' },
+  { label: '⚠️ Kam Stock', prompt: 'Konsay products low stock ya out of stock hain?' },
+  { label: '📋 Udhar Status', prompt: 'Customers ka pending udhar / khata balance kitna hai?' },
+  { label: '🔥 Top Items', prompt: 'Sab se zyada bikne walay products kon se hain?' },
+  { label: '📈 Highest Profit', prompt: 'Highest profit margin walay items kon se hain?' },
+  { label: '🖨️ POS & Slips', prompt: 'Thermal printer aur invoice settings kaise kaam karti hain?' },
+];
 
 interface QuickCard {
   id: string;
@@ -90,7 +107,16 @@ export default function VayparAIScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  const businessId = user?.businessId || user?.id || 'default';
+  // AI Model & Key Management
+  const [selectedModel, setSelectedModel] = useState<string>('qwen/qwen3.8-27b');
+  const [showModelModal, setShowModelModal] = useState<boolean>(false);
+  const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
+  const [customKeyInput, setCustomKeyInput] = useState<string>('');
+  const [testingKey, setTestingKey] = useState<boolean>(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [activeKey, setActiveKey] = useState<string>('');
+
+  const businessId = user?.businessId || user?.id || 'local_business';
   const businessName = user?.businessName || user?.name || 'My Business';
 
   // Screen Width for Responsive Desktop vs Mobile layout
@@ -118,11 +144,15 @@ export default function VayparAIScreen() {
     return `${prefix}, ${businessName}`;
   }, [businessName]);
 
-  // Load Business AI Context & Conversations on mount
+  // Load Business AI Context & Conversations & Model Preferences on mount
   useEffect(() => {
-    if (!user) return;
     loadConversations();
-    getBusinessAIContext(businessId, user).then(setContextData).catch(console.warn);
+    getBusinessAIContext(businessId, user || {}).then(setContextData).catch(console.warn);
+    getSavedAIModel().then(setSelectedModel).catch(console.warn);
+    getActiveGroqKey().then((key) => {
+      setActiveKey(key);
+      setCustomKeyInput(key);
+    }).catch(console.warn);
   }, [businessId, user]);
 
   const loadConversations = async () => {
@@ -185,14 +215,79 @@ export default function VayparAIScreen() {
     );
   };
 
+  const handleSelectModel = async (modelId: string) => {
+    setSelectedModel(modelId);
+    await saveAIModel(modelId);
+    setShowModelModal(false);
+  };
+
+  const handleSaveApiKey = async () => {
+    try {
+      await saveActiveGroqKey(customKeyInput);
+      const newKey = await getActiveGroqKey();
+      setActiveKey(newKey);
+      setShowKeyModal(false);
+      Alert.alert('Saved', 'Groq API Key updated successfully.');
+    } catch {
+      Alert.alert('Error', 'Failed to save Groq API Key.');
+    }
+  };
+
+  const handleResetApiKey = async () => {
+    await saveActiveGroqKey('');
+    setActiveKey(DEFAULT_GROQ_KEY);
+    setCustomKeyInput(DEFAULT_GROQ_KEY);
+    setTestResult(null);
+    Alert.alert('Reset', 'Default Groq API Key restored.');
+  };
+
+  const handleTestConnection = async () => {
+    setTestingKey(true);
+    setTestResult(null);
+    try {
+      const keyToTest = customKeyInput.trim() || activeKey;
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${keyToTest}`,
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: [{ role: 'user', content: 'Salam' }],
+          max_completion_tokens: 10,
+          reasoning_format: 'hidden',
+        }),
+      });
+      if (res.ok) {
+        setTestResult({ ok: true, msg: 'Connected successfully! AI engine is online.' });
+      } else {
+        const txt = await res.text();
+        setTestResult({ ok: false, msg: `Failed (${res.status}): ${txt.slice(0, 100)}` });
+      }
+    } catch (err: any) {
+      setTestResult({ ok: false, msg: err?.message || 'Connection test failed.' });
+    } finally {
+      setTestingKey(false);
+    }
+  };
+
+  const handleCopyText = async (text: string) => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        Alert.alert('Copied', 'Message copied to clipboard.');
+      } else {
+        Alert.alert('Copied', text.slice(0, 60) + '...');
+      }
+    } catch {
+      Alert.alert('Notice', 'Could not copy message.');
+    }
+  };
+
   const handleSendMessage = async (customPrompt?: string) => {
     const textToSend = (customPrompt || inputMessage).trim();
     if (!textToSend || isLoading) return;
-
-    if (!user) {
-      Alert.alert('Authentication Required', 'Please log in to use Vaypar AI.');
-      return;
-    }
 
     setInputMessage('');
     setIsLoading(true);
@@ -214,11 +309,17 @@ export default function VayparAIScreen() {
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 50);
 
       // 3. Refresh live business context for fresh accuracy
-      const liveContext = contextData || (await getBusinessAIContext(businessId, user));
+      const liveContext = contextData || (await getBusinessAIContext(businessId, user || {}));
       setContextData(liveContext);
 
-      // 4. Query Groq AI
-      const aiReplyText = await sendChatMessageToGroq(textToSend, newMessages, liveContext);
+      // 4. Query Groq AI with multi-model cascade & offline intelligence fallback
+      const aiReplyText = await sendChatMessageToGroq(
+        textToSend,
+        newMessages,
+        liveContext,
+        activeKey,
+        selectedModel
+      );
 
       // 5. Save assistant reply locally
       const assistantMsg = await saveAIMessage(conv.id, businessId, 'assistant', aiReplyText);
@@ -227,11 +328,16 @@ export default function VayparAIScreen() {
       // 6. Refresh recent conversations list
       loadConversations();
     } catch (err: any) {
-      const errMsg = err?.message || 'Failed to get AI response. Please try again.';
-      Alert.alert('Vaypar AI Error', errMsg);
+      console.warn('[Vaypar AI Error]', err);
+      const errMsg = err?.message || 'Could not connect to Groq AI. Please check internet connection.';
       if (currentConversation) {
         try {
-          const errAssistantMsg = await saveAIMessage(currentConversation.id, businessId, 'assistant', `⚠️ **AI Service Notice:**\n${errMsg}`);
+          const errAssistantMsg = await saveAIMessage(
+            currentConversation.id,
+            businessId,
+            'assistant',
+            `⚠️ **Notice:**\n${errMsg}`
+          );
           setMessages((prev) => [...prev, errAssistantMsg]);
         } catch (_) {}
       }
@@ -511,6 +617,88 @@ export default function VayparAIScreen() {
               </Text>
 
               <View style={[styles.infoCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+                <Ionicons name="hardware-chip-outline" size={24} color={theme.primary} />
+                <View style={{ flex: 1, marginLeft: 14 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontWeight: '700', fontSize: 15, color: theme.text }}>AI Model Engine</Text>
+                    <TouchableOpacity
+                      onPress={() => setShowModelModal(true)}
+                      style={{
+                        backgroundColor: theme.primaryLight,
+                        paddingHorizontal: 10,
+                        paddingVertical: 4,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>Change</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>
+                    Active Engine: <Text style={{ fontWeight: '700', color: theme.text }}>{SUPPORTED_AI_MODELS.find((m) => m.id === selectedModel)?.name || 'Qwen 3.8 27B'}</Text>
+                  </Text>
+                  <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>
+                    {SUPPORTED_AI_MODELS.find((m) => m.id === selectedModel)?.desc}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={[styles.infoCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+                <Ionicons name="key-outline" size={24} color={theme.primary} />
+                <View style={{ flex: 1, marginLeft: 14 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontWeight: '700', fontSize: 15, color: theme.text }}>Groq AI Key & Status</Text>
+                    <TouchableOpacity
+                      onPress={() => setShowKeyModal(true)}
+                      style={{
+                        backgroundColor: theme.primaryLight,
+                        paddingHorizontal: 10,
+                        paddingVertical: 4,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>Config Key</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>
+                    Key: {activeKey ? `${activeKey.substring(0, 8)}...${activeKey.slice(-4)}` : 'Default In-App Key'}
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 10, flexWrap: 'wrap' }}>
+                    <TouchableOpacity
+                      onPress={handleTestConnection}
+                      disabled={testingKey}
+                      style={{
+                        backgroundColor: theme.primary,
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      {testingKey ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Ionicons name="flash-outline" size={14} color="#FFFFFF" />
+                      )}
+                      <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+                        {testingKey ? 'Testing...' : 'Test Connection'}
+                      </Text>
+                    </TouchableOpacity>
+                    {testResult && (
+                      <Text style={{ fontSize: 12, color: testResult.ok ? '#16A34A' : theme.danger, flexShrink: 1, fontWeight: '600' }}>
+                        {testResult.msg}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              </View>
+
+              <View style={[styles.infoCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
                 <Ionicons name="receipt-outline" size={24} color={theme.primary} />
                 <View style={{ flex: 1, marginLeft: 14 }}>
                   <Text style={{ fontWeight: '700', fontSize: 15, color: theme.text }}>Order Number Sequencing</Text>
@@ -550,14 +738,18 @@ export default function VayparAIScreen() {
             >
               <View style={styles.centerContainer}>
                 {/* Pro Plan / Model Pill Badge */}
-                <View style={[styles.planBadge, { backgroundColor: '#F5EBE1', borderColor: '#E8DBCF' }]}>
+                <TouchableOpacity
+                  onPress={() => setShowModelModal(true)}
+                  style={[styles.planBadge, { backgroundColor: '#F5EBE1', borderColor: '#E8DBCF' }]}
+                  activeOpacity={0.8}
+                >
                   <Text style={styles.planBadgeText}>
                     <Text style={{ fontWeight: '700', color: '#8A5D3B' }}>Vaypar AI</Text>
-                    <Text style={{ color: '#A17D62' }}> · Powered by Groq Llama 3.3</Text>
+                    <Text style={{ color: '#A17D62' }}> · {SUPPORTED_AI_MODELS.find((m) => m.id === selectedModel)?.name || 'Qwen 3.8 27B'}</Text>
                   </Text>
-                </View>
+                </TouchableOpacity>
 
-                {/* Big Elegant Headline: Good afternoon, Lukas / BusinessName */}
+                {/* Big Elegant Headline */}
                 <Text style={[styles.greetingTitle, { color: theme.text }]}>
                   {greeting}
                 </Text>
@@ -574,7 +766,7 @@ export default function VayparAIScreen() {
                   ]}
                 >
                   <TextInput
-                    placeholder="How can I help you today?"
+                    placeholder="How can I help you today? Ask in Urdu or English..."
                     placeholderTextColor={theme.textMuted}
                     value={inputMessage}
                     onChangeText={setInputMessage}
@@ -614,12 +806,16 @@ export default function VayparAIScreen() {
 
                     <View style={styles.inputRightControls}>
                       {/* Model Selector Pill */}
-                      <View style={[styles.modelPill, { backgroundColor: theme.background, borderColor: theme.border }]}>
+                      <TouchableOpacity
+                        onPress={() => setShowModelModal(true)}
+                        style={[styles.modelPill, { backgroundColor: theme.background, borderColor: theme.border }]}
+                        activeOpacity={0.7}
+                      >
                         <Text style={[styles.modelPillText, { color: theme.textSecondary }]}>
-                          Llama 3.3 70B
+                          {SUPPORTED_AI_MODELS.find((m) => m.id === selectedModel)?.name || 'Qwen 3.8 27B'}
                         </Text>
                         <Ionicons name="chevron-down" size={12} color={theme.textMuted} style={{ marginLeft: 4 }} />
-                      </View>
+                      </TouchableOpacity>
 
                       {/* Send Button (Circular with arrow-up) */}
                       <TouchableOpacity
@@ -641,6 +837,26 @@ export default function VayparAIScreen() {
                     </View>
                   </View>
                 </View>
+
+                {/* Urdu / Fast Chips */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 8, paddingBottom: 16 }}
+                  style={{ width: '100%', marginBottom: 12 }}
+                >
+                  {URDU_QUICK_PROMPTS.map((item, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      onPress={() => handleSendMessage(item.prompt)}
+                      style={[styles.quickPromptChip, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: theme.text }}>
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
 
                 {/* QUICK START SECTION (2x2 Grid from reference) */}
                 <View style={styles.quickStartSection}>
@@ -690,9 +906,30 @@ export default function VayparAIScreen() {
                   <Text style={[styles.chatTitleText, { color: theme.text }]} numberOfLines={1}>
                     {currentConversation?.title || 'Active Conversation'}
                   </Text>
-                  <Text style={{ fontSize: 11, color: theme.textMuted }}>
-                    {businessName} · Powered by Groq
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 8 }}>
+                    <Text style={{ fontSize: 11, color: theme.textMuted }}>
+                      {businessName}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => setShowModelModal(true)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: theme.backgroundElement,
+                        paddingHorizontal: 8,
+                        paddingVertical: 2,
+                        borderRadius: 6,
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        gap: 3,
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: theme.primary }}>
+                        {SUPPORTED_AI_MODELS.find((m) => m.id === selectedModel)?.name || 'Qwen 3.8 27B'}
+                      </Text>
+                      <Ionicons name="chevron-down" size={10} color={theme.textMuted} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 <TouchableOpacity
                   onPress={handleStartNewChat}
@@ -712,6 +949,7 @@ export default function VayparAIScreen() {
               >
                 {messages.map((m) => {
                   const isUser = m.role === 'user';
+                  const isNotice = m.content.startsWith('⚠️');
                   return (
                     <View
                       key={m.id}
@@ -733,6 +971,16 @@ export default function VayparAIScreen() {
                             : [styles.assistantBubble, { backgroundColor: theme.backgroundElement, borderColor: theme.border }],
                         ]}
                       >
+                        {!isUser && (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: theme.primary }}>
+                              Vaypar AI Co-Pilot
+                            </Text>
+                            <TouchableOpacity onPress={() => handleCopyText(m.content)} style={{ padding: 2 }}>
+                              <Ionicons name="copy-outline" size={13} color={theme.textMuted} />
+                            </TouchableOpacity>
+                          </View>
+                        )}
                         <Text
                           style={[
                             styles.messageText,
@@ -742,6 +990,28 @@ export default function VayparAIScreen() {
                         >
                           {m.content}
                         </Text>
+                        {isNotice && (
+                          <TouchableOpacity
+                            onPress={() => {
+                              const lastUser = [...messages].reverse().find((x) => x.role === 'user');
+                              if (lastUser) handleSendMessage(lastUser.content);
+                            }}
+                            style={{
+                              marginTop: 8,
+                              backgroundColor: theme.primaryLight,
+                              paddingVertical: 5,
+                              paddingHorizontal: 10,
+                              borderRadius: 6,
+                              alignSelf: 'flex-start',
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <Ionicons name="refresh-outline" size={13} color={theme.primary} />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: theme.primary }}>Retry Request</Text>
+                          </TouchableOpacity>
+                        )}
                         <Text
                           style={[
                             styles.messageTime,
@@ -764,7 +1034,7 @@ export default function VayparAIScreen() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 }}>
                         <ActivityIndicator size="small" color={theme.primary} />
                         <Text style={{ fontSize: 13, color: theme.textMuted, fontStyle: 'italic' }}>
-                          Analyzing {businessName} data...
+                          Analyzing {businessName} data with {SUPPORTED_AI_MODELS.find((m) => m.id === selectedModel)?.name || 'AI'}...
                         </Text>
                       </View>
                     </View>
@@ -772,10 +1042,30 @@ export default function VayparAIScreen() {
                 )}
               </ScrollView>
 
+              {/* Quick Urdu / Roman Urdu chips above input */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 8, gap: 8 }}
+                style={{ backgroundColor: theme.backgroundElement, borderTopWidth: 1, borderTopColor: theme.border }}
+              >
+                {URDU_QUICK_PROMPTS.map((item, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    onPress={() => handleSendMessage(item.prompt)}
+                    style={[styles.quickPromptChip, { backgroundColor: theme.background, borderColor: theme.border }]}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary }}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
               {/* Bottom Sticky Input Bar */}
               <View style={[styles.bottomInputBar, { backgroundColor: theme.backgroundElement, borderTopColor: theme.border }]}>
                 <TextInput
-                  placeholder="Ask Vaypar AI about stock, sales, profits, settings..."
+                  placeholder="Ask Vaypar AI in Urdu or English..."
                   placeholderTextColor={theme.textMuted}
                   value={inputMessage}
                   onChangeText={setInputMessage}
@@ -805,6 +1095,144 @@ export default function VayparAIScreen() {
           )}
         </View>
       </View>
+      {/* Model Selection Modal */}
+      <Modal
+        visible={showModelModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowModelModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="hardware-chip" size={20} color={theme.primary} />
+                <Text style={[styles.modalTitle, { color: theme.text }]}>Select AI Engine</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowModelModal(false)}>
+                <Ionicons name="close" size={20} color={theme.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 14 }}>
+              Choose which high-speed LLM model powers your business co-pilot:
+            </Text>
+
+            {SUPPORTED_AI_MODELS.map((item) => {
+              const isSelected = selectedModel === item.id;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  onPress={() => handleSelectModel(item.id)}
+                  style={[
+                    styles.modelOptionCard,
+                    {
+                      backgroundColor: isSelected ? theme.primaryLight : theme.background,
+                      borderColor: isSelected ? theme.primary : theme.border,
+                    },
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={[styles.modelOptionName, { color: isSelected ? theme.primary : theme.text }]}>
+                        {item.name}
+                      </Text>
+                      <View style={[styles.tagPill, { backgroundColor: isSelected ? theme.primary : theme.backgroundElement }]}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: isSelected ? '#FFFFFF' : theme.textMuted }}>
+                          {item.tag}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>
+                      {item.desc}
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={22}
+                    color={isSelected ? theme.primary : theme.border}
+                  />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom API Key Configuration Modal */}
+      <Modal
+        visible={showKeyModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowKeyModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="key" size={20} color={theme.primary} />
+                <Text style={[styles.modalTitle, { color: theme.text }]}>Groq AI API Key</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowKeyModal(false)}>
+                <Ionicons name="close" size={20} color={theme.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>
+              Enter your Groq Cloud API key (e.g. gsk_...) or leave default:
+            </Text>
+
+            <TextInput
+              placeholder="gsk_..."
+              placeholderTextColor={theme.textMuted}
+              value={customKeyInput}
+              onChangeText={setCustomKeyInput}
+              style={[
+                styles.keyInputBox,
+                { color: theme.text, backgroundColor: theme.background, borderColor: theme.border },
+              ]}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+              <TouchableOpacity
+                onPress={handleTestConnection}
+                disabled={testingKey}
+                style={[styles.modalActionBtn, { backgroundColor: theme.background, borderColor: theme.border }]}
+              >
+                {testingKey ? (
+                  <ActivityIndicator size="small" color={theme.primary} />
+                ) : (
+                  <Ionicons name="flash-outline" size={15} color={theme.text} />
+                )}
+                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>
+                  {testingKey ? 'Testing...' : 'Test Key'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleSaveApiKey}
+                style={[styles.modalActionBtn, { backgroundColor: theme.primary, borderColor: theme.primary, flex: 1 }]}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>Save Key</Text>
+              </TouchableOpacity>
+            </View>
+
+            {testResult && (
+              <Text style={{ fontSize: 12, marginTop: 10, color: testResult.ok ? '#16A34A' : theme.danger }}>
+                {testResult.msg}
+              </Text>
+            )}
+
+            <TouchableOpacity onPress={handleResetApiKey} style={{ alignSelf: 'center', marginTop: 14 }}>
+              <Text style={{ fontSize: 12, color: theme.textMuted, textDecorationLine: 'underline' }}>
+                Reset to default in-app key
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1249,5 +1677,75 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 12,
     alignItems: 'flex-start',
+  },
+  quickPromptChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 480,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  modelOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  modelOptionName: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  tagPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  keyInputBox: {
+    fontSize: 13,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  modalActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
   },
 });
