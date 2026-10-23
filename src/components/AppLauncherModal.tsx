@@ -13,7 +13,17 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useBusinessCategory } from '../context/BusinessContext';
 import { useTheme } from '../hooks/use-theme';
+
+// Map industry modules to matching business categories
+const INDUSTRY_CATEGORY_MAP: Record<string, string[]> = {
+  restaurant: ['restaurant', 'cafe', 'dhaba', 'bakery', 'sweet_shop', 'coffee_shop', 'juice_bar'],
+  pharmacy: ['pharmacy', 'medical_store', 'clinic'],
+  salon: ['beauty_salon', 'spa'],
+  tailor: ['tailor', 'clothing_boutique'],
+  gym: ['gym', 'fitness_center'],
+};
 
 interface AppLauncherModalProps {
   visible: boolean;
@@ -236,9 +246,11 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { user } = useAuth();
+  const { categoryId } = useBusinessCategory();
   const theme = useTheme();
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>('all');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
 
   // ESC key to close on web
   useEffect(() => {
@@ -252,9 +264,22 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [visible, onClose]);
 
+  // Check if current business has an active industry-specific module
+  const hasIndustryModule = Object.entries(INDUSTRY_CATEGORY_MAP).some(([_, cats]) =>
+    cats.includes(categoryId)
+  );
+
   const filteredModules = useMemo(() => {
     const q = search.trim().toLowerCase();
     return BUSINESS_MODULES.filter(m => {
+      // Industry module filter: only show if relevant to current business category!
+      if (m.category === 'industry') {
+        const allowedCategories = INDUSTRY_CATEGORY_MAP[m.id];
+        if (!allowedCategories || !allowedCategories.includes(categoryId)) {
+          return false;
+        }
+      }
+
       const matchesCategory = selectedCategory === 'all' || m.category === selectedCategory;
       if (!matchesCategory) return false;
       if (!q) return true;
@@ -264,7 +289,7 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
         m.id.toLowerCase().includes(q)
       );
     });
-  }, [search, selectedCategory]);
+  }, [search, selectedCategory, categoryId]);
 
   const handleLaunch = (mod: BusinessModule) => {
     onClose();
@@ -318,14 +343,27 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
 
           {/* ── Search Bar & Category Filter ── */}
           <View style={[s.filterBar, { backgroundColor: theme.backgroundElement, borderBottomColor: theme.border }]}>
-            <View style={[s.searchBox, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
-              <Ionicons name="search" size={16} color={theme.textSecondary} style={{ marginRight: 8 }} />
+            <View style={[
+              s.searchBox,
+              {
+                backgroundColor: theme.backgroundSelected,
+                borderColor: isSearchFocused ? '#C5A880' : theme.border,
+              }
+            ]}>
+              <Ionicons
+                name="search"
+                size={16}
+                color={isSearchFocused ? '#C5A880' : theme.textSecondary}
+                style={{ marginRight: 8 }}
+              />
               <TextInput
                 style={[s.searchInput, { color: theme.text }]}
                 placeholder="Search any app, module, or feature (e.g. Udhar, POS, Revenue, Staff)..."
                 placeholderTextColor={theme.textMuted}
                 value={search}
                 onChangeText={setSearch}
+                onFocus={() => setIsSearchFocused(true)}
+                onBlur={() => setIsSearchFocused(false)}
                 autoFocus={visible}
               />
               {search ? (
@@ -342,7 +380,7 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
                 { id: 'commerce', label: 'Sales & POS' },
                 { id: 'finance', label: 'Finance & Ledger' },
                 { id: 'operations', label: 'Operations' },
-                { id: 'industry', label: 'Industry Systems' },
+                ...(hasIndustryModule ? [{ id: 'industry', label: 'Industry Systems' }] : []),
               ].map(cat => {
                 const isActive = selectedCategory === cat.id;
                 return (
@@ -584,12 +622,23 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 9,
   },
   searchInput: {
     flex: 1,
     fontSize: 13,
     padding: 0,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    ...(Platform.OS === 'web'
+      ? ({
+          outline: 'none',
+          outlineStyle: 'none',
+          outlineWidth: 0,
+          borderStyle: 'none',
+          boxShadow: 'none',
+        } as any)
+      : {}),
   },
   categoryScroll: {
     flexDirection: 'row',
