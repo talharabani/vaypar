@@ -1357,10 +1357,10 @@ export default function DashboardScreen() {
               {/* Timeframe Selector Bar */}
               <View style={[styles.timeframeBarContainer, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
                 {[
-                  { key: 'daily', label: 'Daily (Today)', icon: 'today-outline' },
-                  { key: 'weekly', label: 'Weekly (7D)', icon: 'calendar-outline' },
-                  { key: 'monthly', label: 'Monthly (30D)', icon: 'pie-chart-outline' },
-                  { key: 'annually', label: 'Annually (1Y)', icon: 'bar-chart-outline' },
+                  { key: 'daily', label: 'Daily', icon: 'today-outline' },
+                  { key: 'weekly', label: 'Weekly', icon: 'calendar-outline' },
+                  { key: 'monthly', label: 'Monthly', icon: 'pie-chart-outline' },
+                  { key: 'annually', label: 'Annually', icon: 'bar-chart-outline' },
                 ].map((item) => {
                   const isActive = timeframe === item.key;
                   return (

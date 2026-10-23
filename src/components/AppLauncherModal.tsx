@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../hooks/use-theme';
 
 interface AppLauncherModalProps {
   visible: boolean;
@@ -235,6 +236,7 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { user } = useAuth();
+  const theme = useTheme();
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>('all');
 
@@ -289,46 +291,46 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
         <Pressable style={s.backdrop} onPress={onClose} />
 
         {/* Modal Window Dialog */}
-        <View style={s.windowDialog}>
+        <View style={[s.windowDialog, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
           {/* ── Fixed Window Header ── */}
-          <View style={s.header}>
+          <View style={[s.header, { backgroundColor: theme.backgroundElement, borderBottomColor: theme.border }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={s.headerBadge}>
+              <View style={[s.headerBadge, { backgroundColor: '#C5A880' }]}>
                 <Ionicons name="apps" size={20} color="#16171B" />
               </View>
               <View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={s.headerTitle}>All Business Apps & Modules</Text>
-                  <View style={s.proPill}>
+                  <Text style={[s.headerTitle, { color: theme.text }]}>All Business Apps & Modules</Text>
+                  <View style={[s.proPill, { backgroundColor: '#C5A88022', borderColor: '#C5A88050' }]}>
                     <Text style={s.proPillText}>VAYPAR OS</Text>
                   </View>
                 </View>
-                <Text style={s.headerSub}>
+                <Text style={[s.headerSub, { color: theme.textSecondary }]}>
                   Quick launcher to access all store modules, financial ledgers & operations
                 </Text>
               </View>
             </View>
 
-            <TouchableOpacity onPress={onClose} style={s.closeBtn} activeOpacity={0.7}>
-              <Ionicons name="close" size={20} color="#94A3B8" />
+            <TouchableOpacity onPress={onClose} style={[s.closeBtn, { backgroundColor: theme.backgroundSelected }]} activeOpacity={0.7}>
+              <Ionicons name="close" size={18} color={theme.textSecondary} />
             </TouchableOpacity>
           </View>
 
           {/* ── Search Bar & Category Filter ── */}
-          <View style={s.filterBar}>
-            <View style={s.searchBox}>
-              <Ionicons name="search" size={16} color="#64748B" style={{ marginRight: 8 }} />
+          <View style={[s.filterBar, { backgroundColor: theme.backgroundElement, borderBottomColor: theme.border }]}>
+            <View style={[s.searchBox, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
+              <Ionicons name="search" size={16} color={theme.textSecondary} style={{ marginRight: 8 }} />
               <TextInput
-                style={s.searchInput}
+                style={[s.searchInput, { color: theme.text }]}
                 placeholder="Search any app, module, or feature (e.g. Udhar, POS, Revenue, Staff)..."
-                placeholderTextColor="#64748B"
+                placeholderTextColor={theme.textMuted}
                 value={search}
                 onChangeText={setSearch}
                 autoFocus={visible}
               />
               {search ? (
                 <TouchableOpacity onPress={() => setSearch('')}>
-                  <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                  <Ionicons name="close-circle" size={16} color={theme.textSecondary} />
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -347,10 +349,22 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
                   <TouchableOpacity
                     key={cat.id}
                     onPress={() => setSelectedCategory(cat.id as CategoryFilter)}
-                    style={[s.categoryChip, isActive && s.categoryChipActive]}
+                    style={[
+                      s.categoryChip,
+                      {
+                        backgroundColor: isActive ? '#C5A880' : theme.backgroundElement,
+                        borderColor: isActive ? '#C5A880' : theme.border,
+                      },
+                    ]}
                     activeOpacity={0.7}
                   >
-                    <Text style={[s.categoryChipText, isActive && s.categoryChipTextActive]}>
+                    <Text
+                      style={[
+                        s.categoryChipText,
+                        { color: isActive ? '#16171B' : theme.textSecondary },
+                        isActive && s.categoryChipTextActive,
+                      ]}
+                    >
                       {cat.label}
                     </Text>
                   </TouchableOpacity>
@@ -363,13 +377,13 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
           <ScrollView
             style={{ flex: 1 }}
             contentContainerStyle={s.gridContainer}
-            showsVerticalScrollIndicator={true}
+            showsVerticalScrollIndicator={false}
           >
             {filteredModules.length === 0 ? (
               <View style={s.emptyState}>
-                <Ionicons name="search-outline" size={48} color="#475569" />
-                <Text style={s.emptyStateTitle}>No matching business module found</Text>
-                <Text style={s.emptyStateSub}>Try searching for "POS", "Udhar", "Revenue", or "Stock"</Text>
+                <Ionicons name="search-outline" size={48} color={theme.textMuted} />
+                <Text style={[s.emptyStateTitle, { color: theme.text }]}>No matching business module found</Text>
+                <Text style={[s.emptyStateSub, { color: theme.textSecondary }]}>Try searching for "POS", "Udhar", "Revenue", or "Stock"</Text>
               </View>
             ) : (
               <View style={s.grid}>
@@ -384,35 +398,50 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
                       onPress={() => handleLaunch(mod)}
                       style={({ hovered }: any) => [
                         s.card,
-                        hovered && s.cardHovered,
-                        isCurrent && s.cardCurrent,
+                        {
+                          backgroundColor: theme.backgroundElement,
+                          borderColor: theme.border,
+                        },
+                        hovered && [
+                          s.cardHovered,
+                          {
+                            borderColor: '#C5A880',
+                            backgroundColor: theme.backgroundSelected,
+                          },
+                        ],
+                        isCurrent && [
+                          s.cardCurrent,
+                          {
+                            borderColor: '#C5A880',
+                            backgroundColor: '#C5A88015',
+                          },
+                        ],
                       ]}
                     >
-                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-                        {/* Module Icon Container */}
-                        <View style={[s.iconBox, { backgroundColor: mod.color + '18', borderColor: mod.color + '35' }]}>
-                          <Ionicons name={mod.icon} size={22} color={mod.color} />
+                      {/* Top Row: Icon on left, Badge on right */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <View style={[s.iconBox, { backgroundColor: mod.color + '15', borderColor: mod.color + '30' }]}>
+                          <Ionicons name={mod.icon} size={20} color={mod.color} />
                         </View>
-
-                        <View style={{ flex: 1 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                            <Text style={s.cardTitle} numberOfLines={1}>
-                              {mod.title}
-                            </Text>
-                            {mod.badge && (
-                              <View style={[s.badge, { backgroundColor: mod.color + '20', borderColor: mod.color + '45' }]}>
-                                <Text style={[s.badgeText, { color: mod.color }]}>{mod.badge}</Text>
-                              </View>
-                            )}
+                        {mod.badge && (
+                          <View style={[s.badge, { backgroundColor: mod.color + '18', borderColor: mod.color + '40' }]}>
+                            <Text style={[s.badgeText, { color: mod.color }]}>{mod.badge}</Text>
                           </View>
-                          <Text style={s.cardSub} numberOfLines={2}>
-                            {mod.subtitle}
-                          </Text>
-                        </View>
+                        )}
+                      </View>
+
+                      {/* Content: Title & Subtitle with full card width */}
+                      <View style={{ flex: 1, minHeight: 56 }}>
+                        <Text style={[s.cardTitle, { color: theme.text }]} numberOfLines={1}>
+                          {mod.title}
+                        </Text>
+                        <Text style={[s.cardSub, { color: theme.textSecondary }]} numberOfLines={2}>
+                          {mod.subtitle}
+                        </Text>
                       </View>
 
                       {/* Bottom row: Status & launch indicator */}
-                      <View style={s.cardBottom}>
+                      <View style={[s.cardBottom, { borderTopColor: theme.border }]}>
                         {isCurrent ? (
                           <View style={s.currentIndicator}>
                             <View style={s.currentDot} />
@@ -421,8 +450,8 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
                         ) : (
                           <View />
                         )}
-                        <View style={s.arrowBox}>
-                          <Ionicons name="arrow-forward" size={13} color="#94A3B8" />
+                        <View style={[s.arrowBox, { backgroundColor: theme.backgroundSelected }]}>
+                          <Ionicons name="arrow-forward" size={13} color={theme.textSecondary} />
                         </View>
                       </View>
                     </Pressable>
@@ -433,10 +462,10 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
           </ScrollView>
 
           {/* ── Fixed Window Footer ── */}
-          <View style={s.footer}>
+          <View style={[s.footer, { backgroundColor: theme.backgroundSelected, borderTopColor: theme.border }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Ionicons name="shield-checkmark" size={14} color="#C5A880" />
-              <Text style={s.footerText}>
+              <Text style={[s.footerText, { color: theme.textSecondary }]}>
                 {filteredModules.length} Modules Available · Vaypar POS Enterprise Edition
               </Text>
             </View>
@@ -447,13 +476,17 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
                   onClose();
                   router.push('/settings' as any);
                 }}
-                style={s.footerBtn}
+                style={[s.footerBtn, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}
                 activeOpacity={0.7}
               >
-                <Ionicons name="settings-outline" size={13} color="#94A3B8" />
-                <Text style={s.footerBtnText}>Settings</Text>
+                <Ionicons name="settings-outline" size={13} color={theme.textSecondary} />
+                <Text style={[s.footerBtnText, { color: theme.text }]}>Settings</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={onClose} style={[s.footerBtn, { backgroundColor: '#C5A88020', borderColor: '#C5A88050' }]} activeOpacity={0.7}>
+              <TouchableOpacity
+                onPress={onClose}
+                style={[s.footerBtn, { backgroundColor: '#C5A88022', borderColor: '#C5A88050' }]}
+                activeOpacity={0.7}
+              >
                 <Text style={[s.footerBtnText, { color: '#C5A880', fontWeight: '800' }]}>Close (Esc)</Text>
               </TouchableOpacity>
             </View>
@@ -467,7 +500,7 @@ export function AppLauncherModal({ visible, onClose }: AppLauncherModalProps) {
 const s = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(5, 7, 10, 0.78)',
+    backgroundColor: 'rgba(15, 17, 21, 0.65)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: Platform.OS === 'web' ? 24 : 12,
@@ -478,18 +511,16 @@ const s = StyleSheet.create({
   },
   windowDialog: {
     width: '100%',
-    maxWidth: 780,
+    maxWidth: 880,
     maxHeight: Platform.OS === 'web' ? ('86vh' as any) : '92%',
-    backgroundColor: '#16171B',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#262932',
     overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
     ...(Platform.OS === 'web'
       ? ({
-          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.08)',
+          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.25)',
         } as any)
       : {
           elevation: 25,
@@ -502,8 +533,6 @@ const s = StyleSheet.create({
     paddingHorizontal: 22,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#23262F',
-    backgroundColor: '#1A1D23',
   },
   headerBadge: {
     width: 38,
@@ -516,12 +545,10 @@ const s = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#FFFFFF',
     letterSpacing: -0.2,
   },
   headerSub: {
     fontSize: 12,
-    color: '#888E9B',
     marginTop: 2,
   },
   proPill: {
@@ -542,7 +569,6 @@ const s = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#262A34',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -550,23 +576,18 @@ const s = StyleSheet.create({
     paddingHorizontal: 22,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#23262F',
-    backgroundColor: '#16171B',
     gap: 10,
   },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E2129',
     borderWidth: 1,
-    borderColor: '#2B2F3A',
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   searchInput: {
     flex: 1,
-    color: '#FFFFFF',
     fontSize: 13,
     padding: 0,
   },
@@ -579,9 +600,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: '#1E2129',
     borderWidth: 1,
-    borderColor: '#282C37',
   },
   categoryChipActive: {
     backgroundColor: '#C5A880',
@@ -590,7 +609,6 @@ const s = StyleSheet.create({
   categoryChipText: {
     fontSize: 11.5,
     fontWeight: '700',
-    color: '#888E9B',
   },
   categoryChipTextActive: {
     color: '#16171B',
@@ -606,10 +624,8 @@ const s = StyleSheet.create({
   },
   card: {
     width: Platform.OS === 'web' ? ('calc(33.333% - 8px)' as any) : '100%',
-    minWidth: 220,
-    backgroundColor: '#1B1E26',
+    minWidth: 230,
     borderWidth: 1,
-    borderColor: '#262A35',
     borderRadius: 14,
     padding: 14,
     justifyContent: 'space-between',
@@ -621,19 +637,16 @@ const s = StyleSheet.create({
       : {}),
   },
   cardHovered: {
-    backgroundColor: '#222631',
-    borderColor: '#3D4353',
     transform: [{ translateY: -2 }],
-    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
+    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)',
   } as any,
   cardCurrent: {
     borderColor: '#C5A880',
-    backgroundColor: 'rgba(197, 168, 128, 0.08)',
   },
   iconBox: {
-    width: 42,
-    height: 42,
-    borderRadius: 11,
+    width: 38,
+    height: 38,
+    borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -641,18 +654,16 @@ const s = StyleSheet.create({
   cardTitle: {
     fontSize: 13.5,
     fontWeight: '800',
-    color: '#FFFFFF',
     letterSpacing: -0.2,
+    marginBottom: 3,
   },
   cardSub: {
     fontSize: 11,
-    color: '#888E9B',
     lineHeight: 15,
-    marginTop: 2,
   },
   badge: {
-    paddingHorizontal: 5,
-    paddingVertical: 1.5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: 4,
     borderWidth: 1,
   },
@@ -665,10 +676,9 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 12,
+    marginTop: 10,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.04)',
   },
   currentIndicator: {
     flexDirection: 'row',
@@ -690,7 +700,6 @@ const s = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -701,12 +710,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 22,
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: '#23262F',
-    backgroundColor: '#16171B',
   },
   footerText: {
     fontSize: 11.5,
-    color: '#888E9B',
     fontWeight: '600',
   },
   footerBtn: {
@@ -717,12 +723,9 @@ const s = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#2D323E',
-    backgroundColor: '#1E2129',
   },
   footerBtnText: {
     fontSize: 11,
-    color: '#94A3B8',
     fontWeight: '700',
   },
   emptyState: {
@@ -733,11 +736,9 @@ const s = StyleSheet.create({
   emptyStateTitle: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#FFFFFF',
     marginTop: 8,
   },
   emptyStateSub: {
     fontSize: 12,
-    color: '#888E9B',
   },
 });
