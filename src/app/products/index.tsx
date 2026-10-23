@@ -727,93 +727,198 @@ export default function ProductsScreen() {
       {/* ══════════════════════════════════════════════════════════════════════
           ADD / EDIT PRODUCT MODAL
           ══════════════════════════════════════════════════════════════════════ */}
-      <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={() => setModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ width: '100%' }}>
-            <Card style={[styles.modalCard, { backgroundColor: theme.backgroundElement }]}>
-              <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: theme.text }]}>
-                  {editingId ? 'Edit Product' : 'Add New Product'}
-                </Text>
-                <TouchableOpacity onPress={() => setModalVisible(false)}>
-                  <Ionicons name="close" size={24} color={theme.text} />
+      {/* ══════════════════════════════════════════════════════════════════════
+          ADD / EDIT PRODUCT MODAL
+          ══════════════════════════════════════════════════════════════════════ */}
+      <Modal visible={modalVisible} animationType="fade" transparent onRequestClose={() => setModalVisible(false)}>
+        <View style={styles.modalOverlayCenter}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)} />
+
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalContainer}
+          >
+            <View style={[styles.modalCardNew, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+              {/* ── Fixed Modal Header ── */}
+              <View style={[styles.modalHeaderNew, { borderBottomColor: theme.border }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <View style={[styles.modalHeaderIconBadge, { backgroundColor: editingId ? theme.primaryLight : '#10B98118' }]}>
+                    <Ionicons name={editingId ? 'create-outline' : 'add-circle-outline'} size={22} color={editingId ? theme.primary : '#10B981'} />
+                  </View>
+                  <View>
+                    <Text style={[styles.modalTitleNew, { color: theme.text }]}>
+                      {editingId ? 'Edit Product' : 'Add New Product'}
+                    </Text>
+                    <Text style={[styles.modalSubtitleNew, { color: theme.textSecondary }]}>
+                      {editingId ? 'Update pricing, stock count & storefront visibility' : 'Fill details below to add product to catalog'}
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => setModalVisible(false)}
+                  style={[styles.modalCloseBtnNew, { backgroundColor: theme.backgroundSelected }]}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="close" size={18} color={theme.textSecondary} />
                 </TouchableOpacity>
               </View>
 
-              {formError ? (
-                <View style={[styles.errorBox, { backgroundColor: theme.danger + '15', borderColor: theme.danger }]}>
-                  <Ionicons name="alert-circle-outline" size={18} color={theme.danger} />
-                  <Text style={[styles.errorText, { color: theme.danger }]}>{formError}</Text>
-                </View>
-              ) : null}
-
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.formScroll} keyboardShouldPersistTaps="handled">
-                <Input label="Product Name *" placeholder="e.g. Samsung LED 55 inch" value={name} onChangeText={setName} />
-
-                <View style={styles.row}>
-                  <View style={styles.half}>
-                    <Input label="Sale Price (PKR) *" placeholder="e.g. 85,000" value={salePrice} onChangeText={setSalePrice} keyboardType="numeric" />
+              {/* ── Scrollable Form Body ── */}
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.formScrollNew}
+                keyboardShouldPersistTaps="handled"
+                style={{ maxHeight: Platform.OS === 'web' ? ('calc(84vh - 135px)' as any) : undefined }}
+              >
+                {formError ? (
+                  <View style={[styles.errorBox, { backgroundColor: theme.danger + '15', borderColor: theme.danger }]}>
+                    <Ionicons name="alert-circle-outline" size={18} color={theme.danger} />
+                    <Text style={[styles.errorText, { color: theme.danger }]}>{formError}</Text>
                   </View>
-                  <View style={styles.half}>
-                    <Input label="Purchase Price (PKR)" placeholder="e.g. 72,000" value={purchasePrice} onChangeText={setPurchasePrice} keyboardType="numeric" />
-                  </View>
-                </View>
+                ) : null}
 
-                {salePrice && purchasePrice && parseFloat(salePrice.replace(/,/g, '')) > 0 && parseFloat(purchasePrice.replace(/,/g, '')) > 0 ? (() => {
-                  const sp = parseFloat(salePrice.replace(/,/g, '')) || 0;
-                  const pp2 = parseFloat(purchasePrice.replace(/,/g, '')) || 0;
-                  const pft = sp - pp2;
-                  const mgn = pp2 > 0 ? ((pft / pp2) * 100).toFixed(1) : '0';
-                  const pos = pft >= 0;
-                  return (
-                    <View style={[styles.profitPreview, { backgroundColor: pos ? theme.success + '12' : theme.danger + '12', borderColor: pos ? theme.success + '40' : theme.danger + '40' }]}>
-                      <Ionicons name={pos ? 'trending-up' : 'trending-down'} size={16} color={pos ? theme.success : theme.danger} />
-                      <Text style={{ color: pos ? theme.success : theme.danger, fontWeight: '700', fontSize: 13, marginLeft: 6 }}>
-                        Profit: PKR {pft.toFixed(0)} ({mgn}% margin)
-                      </Text>
+                {/* Section 1: Product Identification */}
+                <View style={styles.formSection}>
+                  <Text style={[styles.formSectionTitle, { color: theme.textSecondary }]}>PRODUCT DETAILS</Text>
+                  <Input
+                    label="Product Name *"
+                    placeholder="e.g. Bleu de Chanel Eau de Parfum"
+                    value={name}
+                    onChangeText={setName}
+                  />
+
+                  <View style={styles.row}>
+                    <View style={styles.half}>
+                      <Input
+                        label="Category"
+                        placeholder="e.g. Men's Fragrances"
+                        value={category}
+                        onChangeText={setCategory}
+                      />
                     </View>
-                  );
-                })() : null}
-
-                <View style={styles.row}>
-                  <View style={styles.half}>
-                    <Input label="Stock Qty *" placeholder="e.g. 10" value={quantity} onChangeText={setQuantity} keyboardType="numeric" />
-                  </View>
-                  <View style={styles.half}>
-                    <Input label="Low Stock Alert" placeholder="e.g. 3" value={lowStockThreshold} onChangeText={setLowStockThreshold} keyboardType="numeric" />
-                  </View>
-                </View>
-
-                <View style={styles.row}>
-                  <View style={styles.half}>
-                    <Input label="Category" placeholder="e.g. Fans, Wiring" value={category} onChangeText={setCategory} />
-                  </View>
-                  <View style={styles.half}>
-                    <Input label="Box / Shelf Location" placeholder="e.g. Shelf A3, Box 12" value={boxLocation} onChangeText={setBoxLocation} />
+                    <View style={styles.half}>
+                      <Input
+                        label="Box / Shelf Location"
+                        placeholder="e.g. Shelf A3, Box 12"
+                        value={boxLocation}
+                        onChangeText={setBoxLocation}
+                      />
+                    </View>
                   </View>
                 </View>
 
-                <View style={[styles.toggleRow, { backgroundColor: theme.background, borderColor: theme.border }]}>
+                {/* Section 2: Pricing & Profit Margins */}
+                <View style={styles.formSection}>
+                  <Text style={[styles.formSectionTitle, { color: theme.textSecondary }]}>PRICING & PROFIT</Text>
+                  <View style={styles.row}>
+                    <View style={styles.half}>
+                      <Input
+                        label="Sale Price (PKR) *"
+                        placeholder="e.g. 34,450"
+                        value={salePrice}
+                        onChangeText={setSalePrice}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    <View style={styles.half}>
+                      <Input
+                        label="Purchase Price (PKR)"
+                        placeholder="e.g. 23,000"
+                        value={purchasePrice}
+                        onChangeText={setPurchasePrice}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+
+                  {salePrice && purchasePrice && parseFloat(salePrice.replace(/,/g, '')) > 0 && parseFloat(purchasePrice.replace(/,/g, '')) > 0 ? (() => {
+                    const sp = parseFloat(salePrice.replace(/,/g, '')) || 0;
+                    const pp2 = parseFloat(purchasePrice.replace(/,/g, '')) || 0;
+                    const pft = sp - pp2;
+                    const mgn = pp2 > 0 ? ((pft / pp2) * 100).toFixed(1) : '0';
+                    const pos = pft >= 0;
+                    return (
+                      <View style={[styles.profitPreviewNew, { backgroundColor: pos ? '#10B98114' : theme.danger + '12', borderColor: pos ? '#10B98135' : theme.danger + '35' }]}>
+                        <Ionicons name={pos ? 'trending-up' : 'trending-down'} size={18} color={pos ? '#059669' : theme.danger} />
+                        <View style={{ marginLeft: 8, flex: 1 }}>
+                          <Text style={{ color: pos ? '#059669' : theme.danger, fontWeight: '800', fontSize: 13 }}>
+                            Profit: PKR {pft.toLocaleString('en-PK', { maximumFractionDigits: 0 })}
+                          </Text>
+                          <Text style={{ color: pos ? '#059669' : theme.danger, fontSize: 11, fontWeight: '600', marginTop: 1 }}>
+                            {mgn}% profit margin on cost price
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })() : null}
+                </View>
+
+                {/* Section 3: Inventory Counts */}
+                <View style={styles.formSection}>
+                  <Text style={[styles.formSectionTitle, { color: theme.textSecondary }]}>INVENTORY LEVELS</Text>
+                  <View style={styles.row}>
+                    <View style={styles.half}>
+                      <Input
+                        label="Stock Qty *"
+                        placeholder="e.g. 29"
+                        value={quantity}
+                        onChangeText={setQuantity}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    <View style={styles.half}>
+                      <Input
+                        label="Low Stock Alert"
+                        placeholder="e.g. 3"
+                        value={lowStockThreshold}
+                        onChangeText={setLowStockThreshold}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+                </View>
+
+                {/* Section 4: Online Storefront Switch */}
+                <View style={[styles.toggleRowNew, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
                   <View style={styles.toggleLeft}>
-                    <Ionicons name="storefront-outline" size={20} color={listOnStore ? theme.primary : theme.textSecondary} />
-                    <View style={{ marginLeft: 10 }}>
+                    <View style={[styles.toggleIconBox, { backgroundColor: listOnStore ? '#10B98118' : theme.backgroundElement }]}>
+                      <Ionicons name="storefront-outline" size={20} color={listOnStore ? '#10B981' : theme.textSecondary} />
+                    </View>
+                    <View style={{ marginLeft: 12, flex: 1 }}>
                       <Text style={[styles.toggleLabel, { color: theme.text }]}>List on Online Store</Text>
                       <Text style={[styles.toggleSub, { color: theme.textSecondary }]}>
-                        {listOnStore ? 'Visible to customers' : 'Hidden from public store'}
+                        {listOnStore ? 'Visible on public storefront for WhatsApp orders' : 'Hidden from public storefront catalog'}
                       </Text>
                     </View>
                   </View>
                   <Switch
                     value={listOnStore}
                     onValueChange={setListOnStore}
-                    trackColor={{ false: theme.border, true: theme.primary + '80' }}
-                    thumbColor={listOnStore ? theme.primary : theme.textSecondary}
+                    trackColor={{ false: theme.border, true: '#10B981' }}
+                    thumbColor={listOnStore ? '#FFFFFF' : theme.textSecondary}
                   />
                 </View>
-
-                <Button title={editingId ? 'Save Changes' : 'Add to Catalog'} variant="primary" size="large" onPress={handleSaveProduct} style={{ marginTop: 16 }} />
               </ScrollView>
-            </Card>
+
+              {/* ── Fixed Footer Action Bar ── */}
+              <View style={[styles.modalFooterNew, { borderTopColor: theme.border, backgroundColor: theme.backgroundElement }]}>
+                <Button
+                  title="Cancel"
+                  variant="outline"
+                  size="medium"
+                  onPress={() => setModalVisible(false)}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title={editingId ? 'Save Changes' : 'Add to Catalog'}
+                  variant="primary"
+                  size="medium"
+                  onPress={handleSaveProduct}
+                  style={{ flex: 1.5 }}
+                />
+              </View>
+            </View>
           </KeyboardAvoidingView>
         </View>
       </Modal>
@@ -875,8 +980,29 @@ const styles = StyleSheet.create({
   fab: { position: 'absolute', right: 20, bottom: 96, width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 4 } },
 
   // ── Detail sheet ──
-  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  sheetCard: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: Platform.OS === 'ios' ? 40 : 24, maxHeight: '90%' },
+  sheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 17, 21, 0.65)',
+    justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end',
+    alignItems: 'center',
+    padding: Platform.OS === 'web' ? 24 : 0,
+  },
+  sheetCard: {
+    width: '100%',
+    maxWidth: Platform.OS === 'web' ? 560 : '100%',
+    borderRadius: Platform.OS === 'web' ? 20 : 0,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 22,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 22,
+    maxHeight: '90%',
+    borderWidth: Platform.OS === 'web' ? 1 : 0,
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.3)',
+        } as any)
+      : {}),
+  },
   sheetHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
   sheetHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
   sheetIconBox: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
@@ -909,20 +1035,127 @@ const styles = StyleSheet.create({
   sheetDeleteBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 14, paddingVertical: 13 },
   sheetDeleteBtnText: { fontWeight: '700', fontSize: 14 },
 
-  // ── Add/Edit modal ──
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  modalCard: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24, maxHeight: '92%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle: { fontSize: 18, fontWeight: '800' },
-  formScroll: { paddingBottom: 8 },
-  errorBox: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 },
+  // ── Add/Edit Modal (Centered, Executive, Theme-aware) ──
+  modalOverlayCenter: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 17, 21, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Platform.OS === 'web' ? 24 : 14,
+    zIndex: 99999,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  modalContainer: {
+    width: '100%',
+    maxWidth: 580,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCardNew: {
+    width: '100%',
+    maxWidth: 580,
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    maxHeight: Platform.OS === 'web' ? ('88vh' as any) : '94%',
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.04)',
+        } as any)
+      : {
+          elevation: 24,
+        }),
+  },
+  modalHeaderNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 22,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+  },
+  modalHeaderIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalTitleNew: {
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  modalSubtitleNew: {
+    fontSize: 12,
+    marginTop: 2,
+    maxWidth: 420,
+  },
+  modalCloseBtnNew: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  formScrollNew: {
+    paddingHorizontal: 22,
+    paddingTop: 16,
+    paddingBottom: 16,
+    gap: 14,
+  },
+  formSection: {
+    gap: 10,
+  },
+  formSectionTitle: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  profitPreviewNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 2,
+  },
+  toggleRowNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 4,
+  },
+  toggleIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalFooterNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+  },
+  errorBox: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 4 },
   errorText: { fontSize: 13, fontWeight: '600', flex: 1 },
-  row: { flexDirection: 'row', gap: 10 },
+  row: { flexDirection: 'row', gap: 12 },
   half: { flex: 1 },
-  profitPreview: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10, padding: 10, marginBottom: 8, marginTop: -4 },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 4 },
   toggleLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  toggleLabel: { fontSize: 14, fontWeight: '700' },
+  toggleLabel: { fontSize: 13.5, fontWeight: '700' },
   toggleSub: { fontSize: 11, marginTop: 1 },
 
   // Card Quick Action Buttons
