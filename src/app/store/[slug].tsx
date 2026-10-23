@@ -632,28 +632,45 @@ export default function PublicStorePage() {
             </View>
           </View>
 
-          {/* Right Header: Cart Trigger */}
-          <TouchableOpacity
-            onPress={() => setCartVisible(true)}
-            style={[
-              styles.headerCartBtn,
-              {
-                backgroundColor: cartCount > 0 ? theme.primary : theme.backgroundSelected,
-                borderColor: theme.border,
-              },
-            ]}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="bag-handle-outline" size={17} color={cartCount > 0 ? '#FFFFFF' : theme.text} />
-            <Text style={[styles.headerCartText, { color: cartCount > 0 ? '#FFFFFF' : theme.text }]}>
-              {cartCount > 0 ? fmt(cartTotal) : 'Bag'}
-            </Text>
-            {cartCount > 0 && (
-              <View style={styles.headerCartBadge}>
-                <Text style={styles.headerCartBadgeText}>{cartCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          {/* Right Header: Cart Trigger & WhatsApp Support */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            {business.phone ? (
+              <TouchableOpacity
+                onPress={() => {
+                  const ph = (business.phone || '').replace(/\D/g, '');
+                  const url = `https://wa.me/${ph.startsWith('92') ? ph : '92' + ph}`;
+                  if (IS_WEB) window.open(url, '_blank'); else Linking.openURL(url);
+                }}
+                style={[styles.headerWaBtn, { borderColor: '#25D36640', backgroundColor: '#25D36612' }]}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="logo-whatsapp" size={15} color="#25D366" />
+                {!isMobile && <Text style={styles.headerWaText}>WhatsApp Help</Text>}
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity
+              onPress={() => setCartVisible(true)}
+              style={[
+                styles.headerCartBtn,
+                {
+                  backgroundColor: cartCount > 0 ? theme.primary : theme.backgroundSelected,
+                  borderColor: theme.border,
+                },
+              ]}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="bag-handle-outline" size={17} color={cartCount > 0 ? '#FFFFFF' : theme.text} />
+              <Text style={[styles.headerCartText, { color: cartCount > 0 ? '#FFFFFF' : theme.text }]}>
+                {cartCount > 0 ? fmt(cartTotal) : 'Bag'}
+              </Text>
+              {cartCount > 0 && (
+                <View style={styles.headerCartBadge}>
+                  <Text style={styles.headerCartBadgeText}>{cartCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -662,12 +679,12 @@ export default function PublicStorePage() {
         contentContainerStyle={{ paddingBottom: 130 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Universal Static Hero Banner (Perfect for ALL Businesses) ── */}
-        <View style={[styles.heroBanner, { backgroundColor: theme.heroCard || theme.backgroundElement, borderBottomColor: theme.border }]}>
+        {/* ── Universal Static Hero Banner (Clean Modern Shopify Look) ── */}
+        <View style={[styles.heroBanner, { backgroundColor: theme.backgroundElement, borderBottomColor: theme.border }]}>
           <View style={styles.heroInner}>
-            <View style={[styles.heroPill, { backgroundColor: '#10B98118', borderColor: '#10B98135' }]}>
+            <View style={[styles.heroPill, { backgroundColor: '#10B98115', borderColor: '#10B98135' }]}>
               <View style={[styles.heroPillDot, { backgroundColor: '#10B981' }]} />
-              <Text style={[styles.heroPillText, { color: '#10B981' }]}>
+              <Text style={[styles.heroPillText, { color: '#059669' }]}>
                 Verified Business Storefront
               </Text>
             </View>
@@ -680,34 +697,48 @@ export default function PublicStorePage() {
               Browse through our live catalog with clear pricing. Select items and place your order directly via WhatsApp for quick confirmation and dispatch.
             </Text>
 
-            {/* 4 Pillars Trust Bar */}
-            <View style={styles.trustGrid}>
-              <View style={[styles.trustCard, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
-                <Ionicons name="shield-checkmark-outline" size={18} color={theme.primary} />
+            {/* Shopify-Style Cohesive Trust Strip */}
+            <View style={[styles.trustStrip, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
+              <View style={styles.trustItem}>
+                <View style={[styles.trustIconBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+                  <Ionicons name="shield-checkmark-outline" size={16} color={theme.primary} />
+                </View>
                 <View>
                   <Text style={[styles.trustTitle, { color: theme.text }]}>Guaranteed Quality</Text>
                   <Text style={[styles.trustSub, { color: theme.textMuted }]}>100% Genuine Items</Text>
                 </View>
               </View>
 
-              <View style={[styles.trustCard, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
-                <Ionicons name="flash-outline" size={18} color={theme.primary} />
+              {!isMobile && <View style={[styles.trustDivider, { backgroundColor: theme.border }]} />}
+
+              <View style={styles.trustItem}>
+                <View style={[styles.trustIconBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+                  <Ionicons name="flash-outline" size={16} color={theme.primary} />
+                </View>
                 <View>
                   <Text style={[styles.trustTitle, { color: theme.text }]}>Fast Dispatch</Text>
                   <Text style={[styles.trustSub, { color: theme.textMuted }]}>Direct Store Shipping</Text>
                 </View>
               </View>
 
-              <View style={[styles.trustCard, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
-                <Ionicons name="pricetag-outline" size={18} color={theme.primary} />
+              {!isMobile && <View style={[styles.trustDivider, { backgroundColor: theme.border }]} />}
+
+              <View style={styles.trustItem}>
+                <View style={[styles.trustIconBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+                  <Ionicons name="pricetag-outline" size={16} color={theme.primary} />
+                </View>
                 <View>
                   <Text style={[styles.trustTitle, { color: theme.text }]}>Direct Pricing</Text>
                   <Text style={[styles.trustSub, { color: theme.textMuted }]}>Zero Middleman Markup</Text>
                 </View>
               </View>
 
-              <View style={[styles.trustCard, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
-                <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+              {!isMobile && <View style={[styles.trustDivider, { backgroundColor: theme.border }]} />}
+
+              <View style={styles.trustItem}>
+                <View style={[styles.trustIconBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+                  <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
+                </View>
                 <View>
                   <Text style={[styles.trustTitle, { color: theme.text }]}>Instant Support</Text>
                   <Text style={[styles.trustSub, { color: theme.textMuted }]}>Live WhatsApp Help</Text>
@@ -804,19 +835,35 @@ export default function PublicStorePage() {
         <View style={styles.gridContainer}>
           {filtered.length === 0 ? (
             <View style={[styles.emptyStateCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
-              <Ionicons name="search-outline" size={48} color={theme.textMuted} />
-              <Text style={[styles.emptyTitle, { color: theme.text }]}>No products found</Text>
-              <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
-                Try adjusting your search query or selecting a different category.
+              <Ionicons name={products.length === 0 ? "storefront-outline" : "search-outline"} size={44} color={theme.textMuted} />
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>
+                {products.length === 0 ? "Catalog Coming Soon" : "No products found"}
               </Text>
-              {search.length > 0 && (
+              <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
+                {products.length === 0
+                  ? "The merchant is preparing their live product inventory. You can reach out directly via WhatsApp for inquiries."
+                  : "Try adjusting your search query or selecting a different category."}
+              </Text>
+              {search.length > 0 || activeCategory !== 'All' ? (
                 <TouchableOpacity
                   onPress={() => { setSearch(''); setActiveCategory('All'); }}
                   style={[styles.clearFilterBtn, { backgroundColor: theme.primaryLight, borderColor: theme.primary + '30' }]}
                 >
                   <Text style={[styles.clearFilterText, { color: theme.primary }]}>Clear All Filters</Text>
                 </TouchableOpacity>
-              )}
+              ) : business.phone ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    const ph = (business.phone || '').replace(/\D/g, '');
+                    const url = `https://wa.me/${ph.startsWith('92') ? ph : '92' + ph}`;
+                    if (IS_WEB) window.open(url, '_blank'); else Linking.openURL(url);
+                  }}
+                  style={[styles.clearFilterBtn, { backgroundColor: '#25D36618', borderColor: '#25D36640', flexDirection: 'row', alignItems: 'center', gap: 6 }]}
+                >
+                  <Ionicons name="logo-whatsapp" size={15} color="#25D366" />
+                  <Text style={[styles.clearFilterText, { color: '#16A34A' }]}>Chat with Merchant</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : (
             <View style={styles.grid}>
@@ -1031,6 +1078,20 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 1,
   },
+  headerWaBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  headerWaText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#16A34A',
+  },
   headerCartBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1058,10 +1119,10 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
-  // Universal Static Hero Banner
+  // Universal Static Hero Banner (Shopify Style)
   heroBanner: {
     borderBottomWidth: 1,
-    paddingVertical: 36,
+    paddingVertical: 32,
     paddingHorizontal: 20,
   },
   heroInner: {
@@ -1075,10 +1136,10 @@ const styles = StyleSheet.create({
     gap: 6,
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 4.5,
     borderRadius: 20,
     borderWidth: 1,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   heroPillDot: {
     width: 6,
@@ -1094,38 +1155,54 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: IS_WEB ? 32 : 24,
     fontWeight: '900',
-    letterSpacing: -0.5,
-    marginBottom: 8,
+    letterSpacing: -0.6,
+    marginBottom: 10,
+    lineHeight: IS_WEB ? 40 : 30,
   },
   heroSubtitle: {
     fontSize: 13.5,
     lineHeight: 22,
     maxWidth: 680,
-    marginBottom: 24,
+    marginBottom: 20,
   },
-  trustGrid: {
+  trustStrip: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
     gap: 12,
   },
-  trustCard: {
-    flex: 1,
-    minWidth: 160,
+  trustItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
+    flex: 1,
+    minWidth: 145,
+  },
+  trustIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
   },
   trustTitle: {
     fontSize: 12,
     fontWeight: '800',
+    letterSpacing: -0.2,
   },
   trustSub: {
     fontSize: 10.5,
     marginTop: 1,
+  },
+  trustDivider: {
+    width: 1,
+    height: 28,
   },
 
   // Search & Controls
