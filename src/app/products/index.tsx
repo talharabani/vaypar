@@ -51,6 +51,13 @@ export default function ProductsScreen() {
   const [listOnStore, setListOnStore] = useState(false);
   const [formError, setFormError] = useState('');
 
+  // ── Restock State ────────────────────────────────────────────────────────────
+  const [restockProduct, setRestockProduct] = useState<Product | null>(null);
+  const [restockUnits, setRestockUnits] = useState('10');
+  const [restockPurchasePrice, setRestockPurchasePrice] = useState('');
+  const [restockSaving, setRestockSaving] = useState(false);
+  const [restockError, setRestockError] = useState('');
+
   const categoriesList = useMemo(() => {
     const cats = new Set<string>();
     products.forEach(p => { if (p.category) cats.add(p.category.trim()); });
@@ -144,7 +151,72 @@ export default function ProductsScreen() {
       if (detailProduct?.id === product.id) {
         setDetailProduct(prev => prev ? { ...prev, quantity: newQty } : prev);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleOpenRestockModal = (product: Product) => {
+    setRestockProduct(product);
+    setRestockUnits('10');
+    setRestockPurchasePrice(
+      product.purchasePrice !== undefined && product.purchasePrice !== null && product.purchasePrice > 0
+        ? product.purchasePrice.toString()
+        : ''
+    );
+    setRestockError('');
+  };
+
+  const handleConfirmRestock = async () => {
+    if (!restockProduct) return;
+    setRestockError('');
+    const addUnits = parseInt(restockUnits.replace(/,/g, ''), 10);
+    if (isNaN(addUnits) || addUnits <= 0) {
+      setRestockError('Please enter a valid positive number of units to add.');
+      return;
+    }
+
+    const newPurchasePrice = restockPurchasePrice.trim()
+      ? parseFloat(restockPurchasePrice.replace(/,/g, ''))
+      : (restockProduct.purchasePrice ?? 0);
+
+    const newTotalQty = restockProduct.quantity + addUnits;
+
+    setRestockSaving(true);
+    try {
+      await editProduct(
+        restockProduct.id,
+        restockProduct.name,
+        restockProduct.price,
+        newTotalQty,
+        restockProduct.category || 'General',
+        restockProduct.lowStockThreshold,
+        newPurchasePrice,
+        restockProduct.boxLocation ?? undefined,
+        restockProduct.listOnStore ?? 0
+      );
+
+      // If detail sheet is open, update it in place
+      if (detailProduct?.id === restockProduct.id) {
+        setDetailProduct(prev => prev ? {
+          ...prev,
+          quantity: newTotalQty,
+          purchasePrice: newPurchasePrice,
+        } : null);
+      }
+
+      const addedMsg = `Restocked ${addUnits} units! Total stock is now ${newTotalQty} units.`;
+      setRestockProduct(null);
+      if (Platform.OS === 'web') {
+        window.alert(addedMsg);
+      } else {
+        Alert.alert('Stock Updated', addedMsg);
+      }
+    } catch (err: any) {
+      setRestockError(err.message || 'Failed to restock product.');
+    } finally {
+      setRestockSaving(false);
+    }
   };
 
   return (
@@ -285,12 +357,48 @@ export default function ProductsScreen() {
                   </View>
                 </View>
 
-                {/* Right: stock count + chevron */}
+                {/* Right: stock count + action buttons */}
                 <View style={styles.rightCol}>
                   <Text style={[styles.stockText, { color: isLow ? theme.danger : theme.text }]}>
                     {item.quantity} units
                   </Text>
-                  <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} style={{ marginTop: 4 }} />
+                  
+                  {/* Card Quick Actions: Restock, Edit, Delete */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleOpenRestockModal(item);
+                      }}
+                      style={[styles.cardActionBtn, { backgroundColor: '#10B98118', borderColor: '#10B98150' }]}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="arrow-up-circle-outline" size={13} color="#10B981" />
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#10B981' }}>Restock</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleOpenEditModal(item);
+                      }}
+                      style={[styles.cardActionIconBtn, { backgroundColor: theme.primaryLight, borderColor: theme.primary + '40' }]}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="create-outline" size={13} color={theme.primary} />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleDeleteProduct(item.id, item.name);
+                      }}
+                      style={[styles.cardActionIconBtn, { backgroundColor: theme.danger + '14', borderColor: theme.danger + '35' }]}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="trash-outline" size={13} color={theme.danger} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </Card>
             </TouchableOpacity>
@@ -345,6 +453,36 @@ export default function ProductsScreen() {
                 </View>
 
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+                  {/* ── Main Action Bar: Edit, Restock, Delete ── */}
+                  <View style={styles.sheetTopActionBar}>
+                    <TouchableOpacity
+                      style={[styles.sheetTopActionBtn, { backgroundColor: theme.primaryLight, borderColor: theme.primary }]}
+                      onPress={() => handleOpenEditModal(p)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="create-outline" size={16} color={theme.primary} />
+                      <Text style={[styles.sheetTopActionText, { color: theme.primary }]}>Edit</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.sheetTopActionBtn, { backgroundColor: '#10B98118', borderColor: '#10B98150' }]}
+                      onPress={() => handleOpenRestockModal(p)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="arrow-up-circle-outline" size={16} color="#10B981" />
+                      <Text style={[styles.sheetTopActionText, { color: '#10B981' }]}>Restock</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.sheetTopActionBtn, { backgroundColor: theme.danger + '14', borderColor: theme.danger + '40' }]}
+                      onPress={() => handleDeleteProduct(p.id, p.name)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="trash-outline" size={16} color={theme.danger} />
+                      <Text style={[styles.sheetTopActionText, { color: theme.danger }]}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+
                   {/* ── Status badges ── */}
                   <View style={styles.sheetBadges}>
                     <View style={[styles.sheetBadge, { backgroundColor: isLow ? theme.danger + '15' : theme.success + '15', borderColor: isLow ? theme.danger + '50' : theme.success + '50' }]}>
@@ -432,32 +570,158 @@ export default function ProductsScreen() {
                     </View>
                   )}
 
-                  {/* ── Action buttons ── */}
-                  {!isCashier && (
-                    <View style={styles.sheetActions}>
-                      <TouchableOpacity
-                        style={[styles.sheetEditBtn, { backgroundColor: theme.primaryLight, borderColor: theme.primary }]}
-                        onPress={() => handleOpenEditModal(p)}
-                        activeOpacity={0.8}
-                      >
-                        <Ionicons name="create-outline" size={18} color={theme.primary} />
-                        <Text style={[styles.sheetEditBtnText, { color: theme.primary }]}>Edit Product</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.sheetDeleteBtn, { backgroundColor: theme.danger + '12', borderColor: theme.danger + '40' }]}
-                        onPress={() => handleDeleteProduct(p.id, p.name)}
-                        activeOpacity={0.8}
-                      >
-                        <Ionicons name="trash-outline" size={18} color={theme.danger} />
-                        <Text style={[styles.sheetDeleteBtnText, { color: theme.danger }]}>Delete</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
+                  {/* ── Bottom Action buttons ── */}
+                  <View style={styles.sheetActions}>
+                    <TouchableOpacity
+                      style={[styles.sheetEditBtn, { backgroundColor: theme.primaryLight, borderColor: theme.primary }]}
+                      onPress={() => handleOpenEditModal(p)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="create-outline" size={16} color={theme.primary} />
+                      <Text style={[styles.sheetEditBtnText, { color: theme.primary }]}>Edit</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.sheetEditBtn, { backgroundColor: '#10B98118', borderColor: '#10B98150' }]}
+                      onPress={() => handleOpenRestockModal(p)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="arrow-up-circle-outline" size={16} color="#10B981" />
+                      <Text style={[styles.sheetEditBtnText, { color: '#10B981' }]}>Restock</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.sheetDeleteBtn, { backgroundColor: theme.danger + '12', borderColor: theme.danger + '40' }]}
+                      onPress={() => handleDeleteProduct(p.id, p.name)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="trash-outline" size={16} color={theme.danger} />
+                      <Text style={[styles.sheetDeleteBtnText, { color: theme.danger }]}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
                 </ScrollView>
               </View>
             </View>
           );
         })()}
+      </Modal>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          RESTOCK INVENTORY MODAL
+          ══════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={!!restockProduct}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setRestockProduct(null)}
+      >
+        {restockProduct && (
+          <View style={styles.modalOverlayCenter}>
+            <View style={[styles.restockCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+              {/* Header */}
+              <View style={styles.modalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={[styles.modalHeaderIcon, { backgroundColor: '#10B98118' }]}>
+                    <Ionicons name="arrow-up-circle" size={22} color="#10B981" />
+                  </View>
+                  <View>
+                    <Text style={[styles.modalTitle, { color: theme.text }]}>Restock Inventory</Text>
+                    <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]} numberOfLines={1}>
+                      {restockProduct.name}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => setRestockProduct(null)}>
+                  <Ionicons name="close" size={20} color={theme.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              {restockError ? (
+                <View style={[styles.errorBox, { backgroundColor: theme.danger + '15', borderColor: theme.danger }]}>
+                  <Ionicons name="alert-circle" size={16} color={theme.danger} />
+                  <Text style={[styles.errorText, { color: theme.danger }]}>{restockError}</Text>
+                </View>
+              ) : null}
+
+              {/* Current Stock vs After Restock Banner */}
+              <View style={[styles.stockOverviewBanner, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
+                <View>
+                  <Text style={{ fontSize: 11, color: theme.textSecondary, fontWeight: '600' }}>Current In Stock</Text>
+                  <Text style={{ fontSize: 18, fontWeight: '900', color: theme.text, marginTop: 2 }}>
+                    {restockProduct.quantity} <Text style={{ fontSize: 12, fontWeight: '600', color: theme.textSecondary }}>units</Text>
+                  </Text>
+                </View>
+                <Ionicons name="arrow-forward" size={18} color={theme.textSecondary} />
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ fontSize: 11, color: theme.textSecondary, fontWeight: '600' }}>After Restock</Text>
+                  <Text style={{ fontSize: 18, fontWeight: '900', color: '#10B981', marginTop: 2 }}>
+                    {restockProduct.quantity + (parseInt(restockUnits, 10) || 0)} <Text style={{ fontSize: 12, fontWeight: '600', color: '#10B981' }}>units</Text>
+                  </Text>
+                </View>
+              </View>
+
+              {/* Quick Increment Chips */}
+              <Text style={{ fontSize: 11.5, fontWeight: '700', color: theme.textSecondary, marginTop: 10, marginBottom: 6 }}>
+                QUICK SELECT QUANTITY
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+                {[5, 10, 25, 50, 100].map(amt => (
+                  <TouchableOpacity
+                    key={amt}
+                    onPress={() => setRestockUnits(amt.toString())}
+                    style={[
+                      styles.quickChip,
+                      {
+                        backgroundColor: restockUnits === amt.toString() ? theme.primary : theme.backgroundSelected,
+                        borderColor: restockUnits === amt.toString() ? theme.primary : theme.border,
+                      }
+                    ]}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: restockUnits === amt.toString() ? '#FFFFFF' : theme.text }}>
+                      +{amt}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Units Input */}
+              <Input
+                label="Units to Add (*)"
+                placeholder="e.g. 20"
+                value={restockUnits}
+                onChangeText={setRestockUnits}
+                keyboardType="numeric"
+              />
+
+              {/* Optional: Update Purchase Price */}
+              <View style={{ marginTop: 10 }}>
+                <Input
+                  label="Purchase Price / Unit (Optional PKR)"
+                  placeholder={restockProduct.purchasePrice ? restockProduct.purchasePrice.toString() : 'e.g. 150'}
+                  value={restockPurchasePrice}
+                  onChangeText={setRestockPurchasePrice}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              {/* Buttons */}
+              <View style={styles.modalButtons}>
+                <Button
+                  title="Cancel"
+                  variant="outline"
+                  onPress={() => setRestockProduct(null)}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title={restockSaving ? 'Updating...' : 'Confirm Restock'}
+                  onPress={handleConfirmRestock}
+                  disabled={restockSaving}
+                  style={{ flex: 1, backgroundColor: '#10B981' }}
+                />
+              </View>
+            </View>
+          </View>
+        )}
       </Modal>
 
       {/* ══════════════════════════════════════════════════════════════════════
@@ -660,4 +924,93 @@ const styles = StyleSheet.create({
   toggleLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   toggleLabel: { fontSize: 14, fontWeight: '700' },
   toggleSub: { fontSize: 11, marginTop: 1 },
+
+  // Card Quick Action Buttons
+  cardActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  cardActionIconBtn: {
+    padding: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Sheet Top Action Bar
+  sheetTopActionBar: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  sheetTopActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  sheetTopActionText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+  },
+
+  // Restock Modal
+  modalOverlayCenter: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  restockCard: {
+    width: '100%',
+    maxWidth: 440,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
+  },
+  modalHeaderIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+    maxWidth: 260,
+  },
+  stockOverviewBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginVertical: 12,
+  },
+  quickChip: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 18,
+  },
 });

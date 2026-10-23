@@ -271,8 +271,47 @@ export default function BillsScreen() {
       }
     });
 
+    // 4. Returns & Refunds (Deducts refunded amount from customer total spending)
+    (returnsExchanges || []).forEach(ret => {
+      if (ret.deleted) return;
+      let cleanPhone = (ret.customerPhone || '').trim();
+      let cleanName = (ret.customerName || '').trim();
+
+      // Look up linked invoice if customer phone/name is not set on return record
+      if ((!cleanPhone || !cleanName) && ret.invoiceId) {
+        const matchedInv = (invoices || []).find(i => i.id === ret.invoiceId);
+        if (matchedInv) {
+          if (!cleanPhone) cleanPhone = (matchedInv.customerPhone || '').trim();
+          if (!cleanName) cleanName = (matchedInv.customerName || '').trim();
+        }
+      }
+
+      if (!cleanPhone && !cleanName) return;
+      const key = cleanPhone || cleanName.toLowerCase();
+      const existing = map.get(key);
+
+      let deductAmount = 0;
+      if (ret.type === 'return') {
+        deductAmount = ret.refundAmount || 0;
+      } else if (ret.type === 'exchange') {
+        if ((ret.differenceAmount || 0) < 0) {
+          // Store refunded difference money to customer
+          deductAmount = Math.abs(ret.differenceAmount || 0);
+        } else if ((ret.differenceAmount || 0) > 0) {
+          // Customer paid extra difference
+          if (existing) {
+            existing.totalSpend += (ret.differenceAmount || 0);
+          }
+        }
+      }
+
+      if (existing && deductAmount > 0) {
+        existing.totalSpend = Math.max(0, existing.totalSpend - deductAmount);
+      }
+    });
+
     return Array.from(map.values()).filter(c => c.phone || (c.name && c.name.toLowerCase() !== 'walk-in'));
-  }, [customers, invoices, installmentAccounts]);
+  }, [customers, invoices, installmentAccounts, returnsExchanges]);
 
   // Frequent customers (top customers sorted by visits)
   const frequentCustomers = useMemo(() => {
@@ -348,6 +387,18 @@ export default function BillsScreen() {
     setPhoneDropdownOpen(false);
     setNameDropdownOpen(false);
   };
+
+  // Active Recognized Customer Meta (always synchronizes with net totalSpend after returns)
+  const activeCustomerMeta = useMemo(() => {
+    const cleanPhone = customerPhone.trim();
+    const cleanName = customerName.trim().toLowerCase();
+    if (!cleanPhone && !cleanName) return null;
+    const match = customerDirectory.find(c => 
+      (cleanPhone && c.phone === cleanPhone) || 
+      (cleanName && cleanName !== 'walk-in' && cleanName !== 'walk-in customer' && c.name.toLowerCase() === cleanName)
+    );
+    return match || selectedCustomerMeta;
+  }, [customerPhone, customerName, customerDirectory, selectedCustomerMeta]);
 
   // Credit Accounts state & live limit warning for Credit Sales
   const [creditAccounts, setCreditAccounts] = useState<sqlite.CreditAccount[]>([]);
@@ -1390,7 +1441,7 @@ export default function BillsScreen() {
             )}
 
             {/* Identified Repeat Customer Info Badge */}
-            {selectedCustomerMeta && (
+            {activeCustomerMeta && (
               <View style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -1407,10 +1458,10 @@ export default function BillsScreen() {
                   <Ionicons name="checkmark-circle" size={18} color="#059669" />
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 12, fontWeight: '800', color: '#065F46' }}>
-                      Recognized Customer: {selectedCustomerMeta.name}
+                      Recognized Customer: {activeCustomerMeta.name}
                     </Text>
                     <Text style={{ fontSize: 10.5, color: '#047857' }}>
-                      Mobile: {selectedCustomerMeta.phone || 'N/A'} · {selectedCustomerMeta.totalVisits} Total Bills · PKR {selectedCustomerMeta.totalSpend.toLocaleString('en-IN')} Spent
+                      Mobile: {activeCustomerMeta.phone || 'N/A'} · {activeCustomerMeta.totalVisits} Total Bills · PKR {activeCustomerMeta.totalSpend.toLocaleString('en-IN')} Spent
                     </Text>
                   </View>
                 </View>
