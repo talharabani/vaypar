@@ -7,6 +7,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    Pressable,
     ScrollView,
     StyleSheet,
     Switch,
@@ -58,6 +59,10 @@ export default function ProductsScreen() {
   const [restockSaving, setRestockSaving] = useState(false);
   const [restockError, setRestockError] = useState('');
 
+  // ── Delete State ─────────────────────────────────────────────────────────────
+  const [deletingProduct, setDeletingProduct] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const categoriesList = useMemo(() => {
     const cats = new Set<string>();
     products.forEach(p => { if (p.category) cats.add(p.category.trim()); });
@@ -87,13 +92,13 @@ export default function ProductsScreen() {
   const handleOpenEditModal = (product: Product) => {
     setDetailProduct(null); // close detail sheet first
     setEditingId(product.id);
-    setName(product.name);
-    setSalePrice(product.price.toString());
+    setName(product.name || '');
+    setSalePrice(product.price != null ? product.price.toString() : '');
     setPurchasePrice((product.purchasePrice !== undefined && product.purchasePrice !== null && product.purchasePrice > 0) ? product.purchasePrice.toString() : '');
-    setQuantity(product.quantity.toString());
+    setQuantity(product.quantity != null ? product.quantity.toString() : '');
     setCategory(product.category || '');
     setBoxLocation(product.boxLocation || '');
-    setLowStockThreshold(product.lowStockThreshold.toString());
+    setLowStockThreshold((product.lowStockThreshold ?? 5).toString());
     setListOnStore((product.listOnStore ?? 0) === 1);
     setFormError('');
     setModalVisible(true);
@@ -128,16 +133,26 @@ export default function ProductsScreen() {
   };
 
   const handleDeleteProduct = (id: string, productName: string) => {
-    const msg = `Delete "${productName}"? This will remove it from inventory.`;
-    const doDelete = () => deleteProduct(id).then(() => setDetailProduct(null)).catch(console.error);
-    if (Platform.OS === 'web') {
-      if (window.confirm(msg)) doDelete();
-      return;
+    setDetailProduct(null); // safely dismiss detail modal if open
+    setDeletingProduct({ id, name: productName });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingProduct) return;
+    setIsDeleting(true);
+    try {
+      await deleteProduct(deletingProduct.id);
+      setDeletingProduct(null);
+    } catch (err: any) {
+      console.error('Delete error:', err);
+      if (Platform.OS === 'web') {
+        window.alert(err.message || 'Failed to delete product.');
+      } else {
+        Alert.alert('Error', err.message || 'Failed to delete product.');
+      }
+    } finally {
+      setIsDeleting(false);
     }
-    Alert.alert('Delete Product', msg, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: doDelete },
-    ]);
   };
 
   const handleQuickQtyAdjust = async (product: Product, delta: number) => {
@@ -157,6 +172,7 @@ export default function ProductsScreen() {
   };
 
   const handleOpenRestockModal = (product: Product) => {
+    setDetailProduct(null); // close detail sheet first
     setRestockProduct(product);
     setRestockUnits('10');
     setRestockPurchasePrice(
@@ -284,124 +300,120 @@ export default function ProductsScreen() {
           const margin = pp > 0 ? ((profit / pp) * 100) : null;
 
           return (
-            <TouchableOpacity
-              activeOpacity={0.75}
-              onPress={() => setDetailProduct(item)}
-            >
-              <Card style={styles.productCard}>
-                {/* Left: info */}
-                <View style={{ flex: 1 }}>
-                  <View style={styles.titleRow}>
-                    <Text style={[styles.productName, { color: theme.text }]} numberOfLines={1}>{item.name}</Text>
-                    <View style={styles.badgeRow}>
-                      {isLow && (
-                        <View style={[styles.badge, { backgroundColor: theme.danger + '18', borderColor: theme.danger }]}>
-                          <Text style={[styles.badgeText, { color: theme.danger }]}>Low Stock</Text>
-                        </View>
-                      )}
-                      {item.listOnStore === 1 && (
-                        <View style={[styles.badge, { backgroundColor: theme.success + '18', borderColor: theme.success }]}>
-                          <Ionicons name="storefront-outline" size={10} color={theme.success} />
-                          <Text style={[styles.badgeText, { color: theme.success }]}>Listed</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-
-                  <View style={styles.metaRow}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Ionicons name="pricetag-outline" size={12} color={theme.textSecondary} />
-                      <Text style={[styles.metaText, { color: theme.textSecondary }]}>{item.category || 'General'}</Text>
-                    </View>
-                    {item.boxLocation ? (() => {
-                      const lower = item.boxLocation.toLowerCase();
-                      const boxLabel = (lower.includes('box') || lower.includes('shelf') || lower.includes('rack'))
-                        ? item.boxLocation
-                        : `Box: ${item.boxLocation}`;
-                      return (
-                        <View style={[styles.boxBadge, { backgroundColor: theme.primary + '14', borderColor: theme.primary + '35' }]}>
-                          <Ionicons name="cube" size={11} color={theme.primary} />
-                          <Text style={[styles.boxBadgeText, { color: theme.primary }]}>{boxLabel}</Text>
-                        </View>
-                      );
-                    })() : null}
-                  </View>
-
-                  <View style={styles.priceRow}>
-                    <View style={styles.priceBlock}>
-                      <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Sale</Text>
-                      <Text style={[styles.priceValue, { color: theme.primary }]}>PKR {item.price.toFixed(0)}</Text>
-                    </View>
-                    {(isOwner || user?.role === 'manager' || !user?.role) && (
-                      <>
-                        <View style={[styles.priceDivider, { backgroundColor: theme.border }]} />
-                        <View style={styles.priceBlock}>
-                          <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Purchase</Text>
-                          <Text style={[styles.priceValue, { color: theme.textSecondary }]}>
-                            {pp > 0 ? `PKR ${pp.toLocaleString('en-PK')}` : 'PKR 0'}
-                          </Text>
-                        </View>
-                        {pp > 0 && (
-                          <>
-                            <View style={[styles.priceDivider, { backgroundColor: theme.border }]} />
-                            <View style={styles.priceBlock}>
-                              <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Profit</Text>
-                              <Text style={[styles.priceValue, { color: profit >= 0 ? theme.success : theme.danger }]}>
-                                PKR {profit.toFixed(0)}{margin !== null ? ` (${margin.toFixed(0)}%)` : ''}
-                              </Text>
-                            </View>
-                          </>
-                        )}
-                      </>
+            <Card style={styles.productCard}>
+              {/* Left: info */}
+              <TouchableOpacity
+                activeOpacity={0.75}
+                onPress={() => setDetailProduct(item)}
+                style={{ flex: 1, paddingRight: 8 }}
+              >
+                <View style={styles.titleRow}>
+                  <Text style={[styles.productName, { color: theme.text }]} numberOfLines={1}>{item.name}</Text>
+                  <View style={styles.badgeRow}>
+                    {isLow && (
+                      <View style={[styles.badge, { backgroundColor: theme.danger + '18', borderColor: theme.danger }]}>
+                        <Text style={[styles.badgeText, { color: theme.danger }]}>Low Stock</Text>
+                      </View>
+                    )}
+                    {item.listOnStore === 1 && (
+                      <View style={[styles.badge, { backgroundColor: theme.success + '18', borderColor: theme.success }]}>
+                        <Ionicons name="storefront-outline" size={10} color={theme.success} />
+                        <Text style={[styles.badgeText, { color: theme.success }]}>Listed</Text>
+                      </View>
                     )}
                   </View>
                 </View>
 
-                {/* Right: stock count + action buttons */}
-                <View style={styles.rightCol}>
+                <View style={styles.metaRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Ionicons name="pricetag-outline" size={12} color={theme.textSecondary} />
+                    <Text style={[styles.metaText, { color: theme.textSecondary }]}>{item.category || 'General'}</Text>
+                  </View>
+                  {item.boxLocation ? (() => {
+                    const lower = item.boxLocation.toLowerCase();
+                    const boxLabel = (lower.includes('box') || lower.includes('shelf') || lower.includes('rack'))
+                      ? item.boxLocation
+                      : `Box: ${item.boxLocation}`;
+                    return (
+                      <View style={[styles.boxBadge, { backgroundColor: theme.primary + '14', borderColor: theme.primary + '35' }]}>
+                        <Ionicons name="cube" size={11} color={theme.primary} />
+                        <Text style={[styles.boxBadgeText, { color: theme.primary }]}>{boxLabel}</Text>
+                      </View>
+                    );
+                  })() : null}
+                </View>
+
+                <View style={styles.priceRow}>
+                  <View style={styles.priceBlock}>
+                    <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Sale</Text>
+                    <Text style={[styles.priceValue, { color: theme.primary }]}>PKR {item.price.toFixed(0)}</Text>
+                  </View>
+                  {(isOwner || user?.role === 'manager' || !user?.role) && (
+                    <>
+                      <View style={[styles.priceDivider, { backgroundColor: theme.border }]} />
+                      <View style={styles.priceBlock}>
+                        <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Purchase</Text>
+                        <Text style={[styles.priceValue, { color: theme.textSecondary }]}>
+                          {pp > 0 ? `PKR ${pp.toLocaleString('en-PK')}` : 'PKR 0'}
+                        </Text>
+                      </View>
+                      {pp > 0 && (
+                        <>
+                          <View style={[styles.priceDivider, { backgroundColor: theme.border }]} />
+                          <View style={styles.priceBlock}>
+                            <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Profit</Text>
+                            <Text style={[styles.priceValue, { color: profit >= 0 ? theme.success : theme.danger }]}>
+                              PKR {profit.toFixed(0)}{margin !== null ? ` (${margin.toFixed(0)}%)` : ''}
+                            </Text>
+                          </View>
+                        </>
+                      )}
+                    </>
+                  )}
+                </View>
+              </TouchableOpacity>
+
+              {/* Right: stock count + action buttons */}
+              <View style={styles.rightCol}>
+                <TouchableOpacity
+                  activeOpacity={0.75}
+                  onPress={() => setDetailProduct(item)}
+                  style={{ alignItems: 'flex-end', paddingBottom: 2 }}
+                >
                   <Text style={[styles.stockText, { color: isLow ? theme.danger : theme.text }]}>
                     {item.quantity} units
                   </Text>
-                  
-                  {/* Card Quick Actions: Restock, Edit, Delete */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleOpenRestockModal(item);
-                      }}
-                      style={[styles.cardActionBtn, { backgroundColor: '#10B98118', borderColor: '#10B98150' }]}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="arrow-up-circle-outline" size={13} color="#10B981" />
-                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#10B981' }}>Restock</Text>
-                    </TouchableOpacity>
+                </TouchableOpacity>
+                
+                {/* Card Quick Actions: Restock, Edit, Delete (Independent touch targets) */}
+                <View style={styles.cardActionsContainer}>
+                  <TouchableOpacity
+                    onPress={() => handleOpenRestockModal(item)}
+                    style={[styles.cardActionBtn, { backgroundColor: '#10B98118', borderColor: '#10B98150' }]}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="arrow-up-circle-outline" size={13} color="#10B981" />
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#10B981' }}>Restock</Text>
+                  </TouchableOpacity>
 
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleOpenEditModal(item);
-                      }}
-                      style={[styles.cardActionIconBtn, { backgroundColor: theme.primaryLight, borderColor: theme.primary + '40' }]}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="create-outline" size={13} color={theme.primary} />
-                    </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleOpenEditModal(item)}
+                    style={[styles.cardActionIconBtn, { backgroundColor: theme.primaryLight, borderColor: theme.primary + '40' }]}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="create-outline" size={13} color={theme.primary} />
+                  </TouchableOpacity>
 
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleDeleteProduct(item.id, item.name);
-                      }}
-                      style={[styles.cardActionIconBtn, { backgroundColor: theme.danger + '14', borderColor: theme.danger + '35' }]}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="trash-outline" size={13} color={theme.danger} />
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    onPress={() => handleDeleteProduct(item.id, item.name)}
+                    style={[styles.cardActionIconBtn, { backgroundColor: theme.danger + '14', borderColor: theme.danger + '35' }]}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="trash-outline" size={13} color={theme.danger} />
+                  </TouchableOpacity>
                 </View>
-              </Card>
-            </TouchableOpacity>
+              </View>
+            </Card>
           );
         }}
       />
@@ -613,10 +625,11 @@ export default function ProductsScreen() {
         visible={!!restockProduct}
         animationType="fade"
         transparent
-        onRequestClose={() => setRestockProduct(null)}
+        onRequestClose={() => !restockSaving && setRestockProduct(null)}
       >
         {restockProduct && (
           <View style={styles.modalOverlayCenter}>
+            <Pressable style={styles.modalBackdrop} onPress={() => !restockSaving && setRestockProduct(null)} />
             <View style={[styles.restockCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
               {/* Header */}
               <View style={styles.modalHeader}>
@@ -725,8 +738,52 @@ export default function ProductsScreen() {
       </Modal>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          ADD / EDIT PRODUCT MODAL
+          DELETE CONFIRMATION MODAL
           ══════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={!!deletingProduct}
+        animationType="fade"
+        transparent
+        onRequestClose={() => !isDeleting && setDeletingProduct(null)}
+      >
+        {deletingProduct && (
+          <View style={styles.modalOverlayCenter}>
+            <Pressable
+              style={styles.modalBackdrop}
+              onPress={() => !isDeleting && setDeletingProduct(null)}
+            />
+            <View style={[styles.deleteModalCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+              <View style={[styles.deleteIconBadge, { backgroundColor: theme.danger + '18' }]}>
+                <Ionicons name="trash-outline" size={28} color={theme.danger} />
+              </View>
+              <Text style={[styles.deleteModalTitle, { color: theme.text }]}>Delete Product?</Text>
+              <Text style={[styles.deleteModalDesc, { color: theme.textSecondary }]}>
+                Are you sure you want to permanently remove <Text style={{ fontWeight: '700', color: theme.text }}>"{deletingProduct.name}"</Text> from your inventory? This cannot be undone.
+              </Text>
+              <View style={styles.deleteModalBtnRow}>
+                <Button
+                  title="Cancel"
+                  variant="outline"
+                  size="medium"
+                  onPress={() => setDeletingProduct(null)}
+                  disabled={isDeleting}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title={isDeleting ? 'Deleting...' : 'Delete'}
+                  variant="danger"
+                  size="medium"
+                  onPress={handleConfirmDelete}
+                  loading={isDeleting}
+                  disabled={isDeleting}
+                  style={{ flex: 1.2 }}
+                />
+              </View>
+            </View>
+          </View>
+        )}
+      </Modal>
+
       {/* ══════════════════════════════════════════════════════════════════════
           ADD / EDIT PRODUCT MODAL
           ══════════════════════════════════════════════════════════════════════ */}
@@ -1159,17 +1216,23 @@ const styles = StyleSheet.create({
   toggleSub: { fontSize: 11, marginTop: 1 },
 
   // Card Quick Action Buttons
+  cardActionsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
   cardActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
   },
   cardActionIconBtn: {
-    padding: 5,
+    padding: 6,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
@@ -1197,13 +1260,46 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
-  // Restock Modal
-  modalOverlayCenter: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
+  // Delete Confirmation Modal
+  deleteModalCard: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 24,
     alignItems: 'center',
-    padding: 16,
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.35)',
+        } as any)
+      : {
+          elevation: 24,
+        }),
+  },
+  deleteIconBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  deleteModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  deleteModalDesc: {
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  deleteModalBtnRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
   },
   restockCard: {
     width: '100%',
@@ -1211,6 +1307,17 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: -0.2,
   },
   modalHeaderIcon: {
     width: 36,
